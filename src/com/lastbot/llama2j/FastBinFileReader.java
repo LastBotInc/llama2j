@@ -29,19 +29,29 @@ public class FastBinFileReader implements Closeable {
         }
     }
 
+    private static final int MAX_CHUNK_SIZE = (Integer.MAX_VALUE / 4) - 3;
+
     public void nextFloatArray(int count, FloatArrayProcessor processor) {
         new Thread(() -> {
-            MappedByteBuffer buffer = read(count * 4L);
-            if (buffer != null) {
-                float[] data = new float[count];
-                for (int i = 0; i < count; i++) {
-                    data[i] = buffer.getFloat();
-                }
-                processor.process(data);
-            } else {
-                processor.process(null);
-            }
+            float[] data = new float[count];
+            long remaining = count;
+            int index = 0;
 
+            while (remaining > 0) {
+                long size = Math.min(remaining, MAX_CHUNK_SIZE);
+                MappedByteBuffer buffer = read(size * 4L);
+                if (buffer != null) {
+                    for (int i = 0; i < size; i++) {
+                        data[index] = buffer.getFloat();
+                        index++;
+                    }
+                    remaining -= size;
+                } else {
+                    processor.process(null);
+                    return;
+                }
+            }
+            processor.process(data);
         }).start();
     }
 
@@ -57,7 +67,7 @@ public class FastBinFileReader implements Closeable {
         return buffer.getFloat();
     }
 
-    public float nextInt() {
+    public int nextInt() {
         MappedByteBuffer buffer = read(4L);
         if (buffer == null) {
             error();

@@ -14,8 +14,6 @@ public class BinFileReader implements Closeable {
     private int currentBuffer = 0;
 
     public BinFileReader(String filePath) throws IOException {
-        LLogger.debug(">>> Integer.MAX_VALUE " + String.format("%,d", Integer.MAX_VALUE));
-
         try (RandomAccessFile file = new RandomAccessFile(filePath, "r");
              FileChannel channel = file.getChannel()) {
 

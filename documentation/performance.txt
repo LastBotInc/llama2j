@@ -12,3 +12,16 @@ achieved tok/s: 10.544597
 
 Java stories15M.bin
 achieved tok/s: 99.6
+
+llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth"
+achieved tok/s: 0.2
+
+-------
+
+BinFileReader
+Read model in 18.50 s
+Read model in 0.01 s
+
+FastBinFileReader
+Read model in 3.94 s
+INFO: 2023-07-31 19:21:05 Read tokenizer in 0.01 s
