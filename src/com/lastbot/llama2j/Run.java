@@ -19,14 +19,14 @@ import java.util.concurrent.CountDownLatch;
 import static java.lang.Math.abs;
 
 public class Run {
-    private static final int THREAD_COUNT = 24;
+    private static final int THREAD_COUNT = 16;
 
     private static final String MODELS_DIRECTORY = "models";
     private static final String TOKENIZER_FILE = "tokenizer.bin";
 
     private static int maxCallocSize = 0;
 
-    private static XoRoShiRo128PlusRandom random = new XoRoShiRo128PlusRandom();
+    private static final XoRoShiRo128PlusRandom random = new XoRoShiRo128PlusRandom();
 
     private static float[] calloc(long elements) {
         if (elements <= Integer.MAX_VALUE) {
@@ -474,37 +474,18 @@ public class Run {
     }
 
     public static void main(String[] args) {
-        // poor man's argparse
-        String checkpoint;
-        float temperature = 0.9f; // e.g. 1.0, or 0.0
-        int steps = 256;          // max number of steps to run for, 0: use seq_len
-        String prompt = "";      // prompt string
 
-        // 'checkpoint' is necessary arg
-        if (args.length < 1) {
-            System.out.println("Usage: <COMMAND> <checkpoint_file> [temperature] [steps] [prompt]\n");
-            System.exit(1);
-        }
-        checkpoint = args[0];
-        if (args.length >= 2) {
-            // optional temperature. 0.0 = (deterministic) argmax sampling. 1.0 = baseline
-            temperature = Float.parseFloat(args[1]);
-        }
-        if (args.length >= 3) {
-            steps = Integer.parseInt(args[2]);
-        }
-        if (args.length >= 4) {
-            prompt = args[3];
-        }
-
-        // read in the model.bin file
+        CommandLine commandLine = new CommandLine(args);
 
         Config config = new Config();
         TransformerWeights weights = new TransformerWeights();
 
+        // read in the checkpoint file
         long startModelRead = time();
+        LLogger.info("Start reading checkpoint " + commandLine.getCheckpoint());
 
-        try (BinFileReader reader = new BinFileReader(MODELS_DIRECTORY + File.separator + checkpoint)) {
+        try (BinFileReader reader =
+                     new BinFileReader(MODELS_DIRECTORY + File.separator + commandLine.getCheckpoint())) {
             // read in the config header
             config.dim = reader.nextInt(); // transformer dimension
             config.hidden_dim = reader.nextInt(); // for ffn layers
@@ -525,8 +506,9 @@ public class Run {
 
         long endModelRead = time();
 
-        LLogger.info("Read model in " + String.format("%.2f", (endModelRead - startModelRead) / 1000d) + " s");
+        LLogger.info("Read checkpoint in " + String.format("%.2f", (endModelRead - startModelRead) / 1000d) + " s");
 
+        int steps = commandLine.getSteps();
         // right now we cannot run for more than config.seq_len steps
         if (steps <= 0 || steps > config.seq_len) {
             steps = config.seq_len;
@@ -563,8 +545,8 @@ public class Run {
         // process the prompt, if any
         int[] prompt_tokens = new int[config.seq_len];
         int num_prompt_tokens = 0;
-        if (prompt != null) {
-            num_prompt_tokens = bpe_encode(prompt, vocab, vocab_scores, max_token_length, prompt_tokens);
+        if (commandLine.getPrompt() != null) {
+            num_prompt_tokens = bpe_encode(commandLine.getPrompt() , vocab, vocab_scores, max_token_length, prompt_tokens);
         }
 
         // start the main loop
@@ -584,13 +566,13 @@ public class Run {
                 next = prompt_tokens[pos];
             } else {
                 // sample the next token
-                if (temperature == 0.0f) {
+                if (commandLine.getTemperature() == 0.0f) {
                     // greedy argmax sampling: take the token with the highest probability
                     next = argmax(state.logits, config.vocab_size);
                 } else {
                     // apply the temperature to the logits
                     for (int q = 0; q < config.vocab_size; q++) {
-                        state.logits[q] /= temperature;
+                        state.logits[q] /= commandLine.getTemperature() ;
                     }
                     // apply softmax to the logits to get the probabilities for next token
                     softmax(state.logits, 0, config.vocab_size);
