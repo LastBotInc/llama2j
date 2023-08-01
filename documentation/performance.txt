@@ -1,0 +1,14 @@
+./run stories15M.bin
+achieved tok/s: 107.007973
+
+./run stories42M.bin
+achieved tok/s: 36.470252
+
+./run stories42M.bin 1.0 256 "One day, Lily met a Shoggoth"
+achieved tok/s: 36.454610
+
+MP_NUM_THREADS=64 ./run llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth"
+achieved tok/s: 10.544597
+
+Java stories15M.bin
+achieved tok/s: 99.6

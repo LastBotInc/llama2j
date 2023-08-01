@@ -1,0 +1,23 @@
+git clone https://github.com/karpathy/llama2.c.git
+cd llama2.c/
+wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
+wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories42M.bin
+mkdir model
+cd model
+
+conda create --name llama2
+conda activate llama2
+
+sudo apt install python3-pip
+
+#download model from https://huggingface.co/meta-llama/Llama-2-7b-chat
+
+python3 export_meta_llama_bin.py  model/Llama-2-7b-chat/ llama2_7b.bin
+
+# Check size:
+ls -l llama2_7b.bin
+E.g.
+-rw-rw-r-- 1 tero tero 26954711068 Jul 31 12:44 llama2_7b.bin
+
+sudo apt install clang libomp-dev
+
