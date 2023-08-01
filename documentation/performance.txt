@@ -18,8 +18,17 @@ achieved tok/s: 0.2
 
 Parallel matmul:
 
-llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth"
+llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth", 64 threads
 achieved tok/s: 1.5
+
+llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth", 32 threads
+achieved tok/s: 2.3
+
+llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth", 16 threads
+achieved tok/s: 2.1
+
+llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth", 8 threads
+achieved tok/s: 1.3
 
 -------
 
