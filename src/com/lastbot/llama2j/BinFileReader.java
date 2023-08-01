@@ -20,16 +20,12 @@ public class BinFileReader implements Closeable {
             long readSize = 0;
             long fileSize = file.length();
 
-            LLogger.debug(">>> filesize " + String.format("%,d", fileSize));
-
             int numberOfBuffers = (int) (fileSize / ALIGNED_BY_4_BYTES_MAX_BUFFER_SIZE + 1);
             buffers = new MappedByteBuffer[numberOfBuffers];
 
             for (int i = 0; i < numberOfBuffers; i++) {
                 long remaining = fileSize - readSize;
                 long chunkSize = Math.min(remaining, ALIGNED_BY_4_BYTES_MAX_BUFFER_SIZE);
-
-                LLogger.debug(">>> chunkSize " + String.format("%,d", chunkSize));
 
                 buffers[i] = channel.map(FileChannel.MapMode.READ_ONLY, readSize, chunkSize);
                 buffers[i].order(ByteOrder.LITTLE_ENDIAN);
