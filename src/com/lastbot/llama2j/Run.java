@@ -83,108 +83,109 @@ public class Run {
      * @param p
      * @param sharedWeights
      */
-    private static void checkPointInitWeights(FastBinFileReader reader, TransformerWeights w, Config p, boolean sharedWeights) {
-        CountDownLatch latch = new CountDownLatch(14);
-
-        reader.nextFloatArray(p.vocab_size * p.dim, data -> {
-            w.token_embedding_table = data;
-            latch.countDown();
-        });
-        reader.nextFloatArray(p.n_layers * p.dim, data -> {
-            w.rms_att_weight = data;
-            latch.countDown();
-        });
-        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
-            w.wq = data;
-            latch.countDown();
-        });
-        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
-            w.wk = data;
-            latch.countDown();
-        });
-        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
-            w.wv = data;
-            latch.countDown();
-        });
-        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
-            w.wo = data;
-            latch.countDown();
-        });
-
-        reader.nextFloatArray(p.n_layers * p.dim, data -> {
-            w.rms_ffn_weight = data;
-            latch.countDown();
-        });
-
-        reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim, data -> {
-            w.w1 = data;
-            latch.countDown();
-        });
-
-        reader.nextFloatArray(p.n_layers * p.hidden_dim * p.dim, data -> {
-            w.w2 = data;
-            latch.countDown();
-        });
-
-        reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim, data -> {
-            w.w3 = data;
-            latch.countDown();
-        });
-
-        reader.nextFloatArray(p.dim, data -> {
-            w.rms_final_weight = data;
-            latch.countDown();
-        });
-
-        int head_size = p.dim / p.n_heads;
-
-        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
-            w.freq_cis_real = data;
-            latch.countDown();
-        });
-
-        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
-            w.freq_cis_imag = data;
-            latch.countDown();
-        });
-
-        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
-            w.freq_cis_imag = data;
-            latch.countDown();
-        });
-
-        if (sharedWeights) {
-            w.wcls = w.token_embedding_table;
-            latch.countDown();
-        } else {
-            reader.nextFloatArray(p.vocab_size * p.dim, data -> {
-                w.wcls = data;
-                latch.countDown();
-            });
-        }
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            LLogger.error("Loading model was interrupted");
-        }
-    }
-
-    //        w.token_embedding_table = reader.nextFloatArray(p.vocab_size * p.dim);
-//        w.rms_att_weight = reader.nextFloatArray(p.n_layers * p.dim);
-//        w.wq = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-//        w.wk = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-//        w.wv = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-//        w.wo = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-//        w.rms_ffn_weight = reader.nextFloatArray(p.n_layers * p.dim);
-//        w.w1 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
-//        w.w2 = reader.nextFloatArray(p.n_layers * p.hidden_dim * p.dim);
-//        w.w3 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
-//        w.rms_final_weight = reader.nextFloatArray(p.dim);
-//        int head_size = p.dim / p.n_heads;
-//        w.freq_cis_real = reader.nextFloatArray(p.seq_len * head_size / 2);
-//        w.freq_cis_imag = reader.nextFloatArray(p.seq_len * head_size / 2);
+    private static void checkPointInitWeights(BinFileReader reader, TransformerWeights w, Config p, boolean sharedWeights) {
+//        CountDownLatch latch = new CountDownLatch(14);
 //
-//        w.wcls = sharedWeights ? w.token_embedding_table : reader.nextFloatArray(p.vocab_size * p.dim);
+//        reader.nextFloatArray(p.vocab_size * p.dim, data -> {
+//            w.token_embedding_table = data;
+//            latch.countDown();
+//        });
+//        reader.nextFloatArray(p.n_layers * p.dim, data -> {
+//            w.rms_att_weight = data;
+//            latch.countDown();
+//        });
+//        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
+//            w.wq = data;
+//            latch.countDown();
+//        });
+//        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
+//            w.wk = data;
+//            latch.countDown();
+//        });
+//        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
+//            w.wv = data;
+//            latch.countDown();
+//        });
+//        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
+//            w.wo = data;
+//            latch.countDown();
+//        });
+//
+//        reader.nextFloatArray(p.n_layers * p.dim, data -> {
+//            w.rms_ffn_weight = data;
+//            latch.countDown();
+//        });
+//
+//        reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim, data -> {
+//            w.w1 = data;
+//            latch.countDown();
+//        });
+//
+//        reader.nextFloatArray(p.n_layers * p.hidden_dim * p.dim, data -> {
+//            w.w2 = data;
+//            latch.countDown();
+//        });
+//
+//        reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim, data -> {
+//            w.w3 = data;
+//            latch.countDown();
+//        });
+//
+//        reader.nextFloatArray(p.dim, data -> {
+//            w.rms_final_weight = data;
+//            latch.countDown();
+//        });
+//
+//        int head_size = p.dim / p.n_heads;
+//
+//        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
+//            w.freq_cis_real = data;
+//            latch.countDown();
+//        });
+//
+//        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
+//            w.freq_cis_imag = data;
+//            latch.countDown();
+//        });
+//
+//        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
+//            w.freq_cis_imag = data;
+//            latch.countDown();
+//        });
+//
+//        if (sharedWeights) {
+//            w.wcls = w.token_embedding_table;
+//            latch.countDown();
+//        } else {
+//            reader.nextFloatArray(p.vocab_size * p.dim, data -> {
+//                w.wcls = data;
+//                latch.countDown();
+//            });
+//        }
+//        try {
+//            latch.await();
+//        } catch (InterruptedException e) {
+//            LLogger.error("Loading model was interrupted");
+//        }
+//    }
+
+        w.token_embedding_table = reader.nextFloatArray(p.vocab_size * p.dim);
+        w.rms_att_weight = reader.nextFloatArray(p.n_layers * p.dim);
+        w.wq = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
+        w.wk = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
+        w.wv = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
+        w.wo = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
+        w.rms_ffn_weight = reader.nextFloatArray(p.n_layers * p.dim);
+        w.w1 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
+        w.w2 = reader.nextFloatArray(p.n_layers * p.hidden_dim * p.dim);
+        w.w3 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
+        w.rms_final_weight = reader.nextFloatArray(p.dim);
+        int head_size = p.dim / p.n_heads;
+        w.freq_cis_real = reader.nextFloatArray(p.seq_len * head_size / 2);
+        w.freq_cis_imag = reader.nextFloatArray(p.seq_len * head_size / 2);
+
+        w.wcls = sharedWeights ? w.token_embedding_table : reader.nextFloatArray(p.vocab_size * p.dim);
+    }
 
 // ----------------------------------------------------------------------------
 // neural net blocks
@@ -231,7 +232,41 @@ public class Run {
         }
     }
 
+
+    private static final int THREAD_COUNT = Runtime.getRuntime().availableProcessors();
+
     private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
+        int sizePerThread = d / THREAD_COUNT;
+        CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
+        for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
+            // W (d,n) @ x (n,) -> xout (d,)
+            final int end = Math.min(d, (threadId + 1) * sizePerThread);
+//            LLogger.debug(">>> d " + d + ", n " + n);
+            int finalThreadId = threadId;
+            new Thread(() -> {
+                try {
+                    float val;
+                    for (int i = finalThreadId * sizePerThread; i < end; i++) {
+                        int base = weightIndex + i * n;
+                        val = 0.0f;
+                        for (int j = 0; j < n; j++) {
+                            val += w[base + j] * x[j];
+                        }
+                        xout[i] = val;
+                    }
+                } finally {
+                    latch.countDown();
+                }
+            }).start();
+        }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            LLogger.error("fastMatmul was interrupted");
+        }
+    }
+
+    private static void matmulOLD(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
         // W (d,n) @ x (n,) -> xout (d,)
         // by far the most amount of time is spent inside this little function
         int i;
@@ -551,7 +586,7 @@ public class Run {
 
         long startModelRead = time();
 
-        try (FastBinFileReader reader = new FastBinFileReader(MODELS_DIRECTORY + File.separator + checkpoint)) {
+        try (BinFileReader reader = new BinFileReader(MODELS_DIRECTORY + File.separator + checkpoint)) {
             // read in the config header
             config.dim = reader.nextInt(); // transformer dimension
             config.hidden_dim = reader.nextInt(); // for ffn layers

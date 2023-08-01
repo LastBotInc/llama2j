@@ -43,23 +43,21 @@ public class BinFileReader implements Closeable {
     }
 
     public float[] nextFloatArray(int count) {
-        MappedByteBuffer buffer = buffers[currentBuffer];
-        // If enough in this buffer, read
-        LLogger.debug(">>> remaining " + String.format("%,d", buffer.remaining()));
-        LLogger.debug(">>> count " + String.format("%,d", count));
-        if (buffer.remaining() >= 4L * count) {
-            float[] data = new float[count];
-            for (int i = 0; i < count; i++) {
-                data[i] = buffer.getFloat();
+        int remaining = count;
+        int index = 0;
+        float[] data = new float[count];
+        while (remaining > 0) {
+            MappedByteBuffer buffer = buffers[currentBuffer];
+            int size = Math.min(remaining, buffer.remaining() / 4);
+            for (int i = 0; i < size; i++) {
+                data[index++] = buffer.getFloat();
             }
-            return data;
-        } else {
-            float[] data = new float[count];
-            for (int i = 0; i < count; i++) {
-                data[i] = nextFloat();
+            remaining -= size;
+            if (buffer.remaining() == 0) {
+                currentBuffer++;
             }
-            return data;
         }
+        return data;
     }
 
     private void rollover(long length) {
