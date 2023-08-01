@@ -19,6 +19,8 @@ import java.util.concurrent.CountDownLatch;
 import static java.lang.Math.abs;
 
 public class Run {
+    private static final int THREAD_COUNT = 24;
+
     private static final String MODELS_DIRECTORY = "models";
     private static final String TOKENIZER_FILE = "tokenizer.bin";
 
@@ -84,91 +86,6 @@ public class Run {
      * @param sharedWeights
      */
     private static void checkPointInitWeights(BinFileReader reader, TransformerWeights w, Config p, boolean sharedWeights) {
-//        CountDownLatch latch = new CountDownLatch(14);
-//
-//        reader.nextFloatArray(p.vocab_size * p.dim, data -> {
-//            w.token_embedding_table = data;
-//            latch.countDown();
-//        });
-//        reader.nextFloatArray(p.n_layers * p.dim, data -> {
-//            w.rms_att_weight = data;
-//            latch.countDown();
-//        });
-//        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
-//            w.wq = data;
-//            latch.countDown();
-//        });
-//        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
-//            w.wk = data;
-//            latch.countDown();
-//        });
-//        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
-//            w.wv = data;
-//            latch.countDown();
-//        });
-//        reader.nextFloatArray(p.n_layers * p.dim * p.dim, data -> {
-//            w.wo = data;
-//            latch.countDown();
-//        });
-//
-//        reader.nextFloatArray(p.n_layers * p.dim, data -> {
-//            w.rms_ffn_weight = data;
-//            latch.countDown();
-//        });
-//
-//        reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim, data -> {
-//            w.w1 = data;
-//            latch.countDown();
-//        });
-//
-//        reader.nextFloatArray(p.n_layers * p.hidden_dim * p.dim, data -> {
-//            w.w2 = data;
-//            latch.countDown();
-//        });
-//
-//        reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim, data -> {
-//            w.w3 = data;
-//            latch.countDown();
-//        });
-//
-//        reader.nextFloatArray(p.dim, data -> {
-//            w.rms_final_weight = data;
-//            latch.countDown();
-//        });
-//
-//        int head_size = p.dim / p.n_heads;
-//
-//        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
-//            w.freq_cis_real = data;
-//            latch.countDown();
-//        });
-//
-//        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
-//            w.freq_cis_imag = data;
-//            latch.countDown();
-//        });
-//
-//        reader.nextFloatArray(p.seq_len * head_size / 2, data -> {
-//            w.freq_cis_imag = data;
-//            latch.countDown();
-//        });
-//
-//        if (sharedWeights) {
-//            w.wcls = w.token_embedding_table;
-//            latch.countDown();
-//        } else {
-//            reader.nextFloatArray(p.vocab_size * p.dim, data -> {
-//                w.wcls = data;
-//                latch.countDown();
-//            });
-//        }
-//        try {
-//            latch.await();
-//        } catch (InterruptedException e) {
-//            LLogger.error("Loading model was interrupted");
-//        }
-//    }
-
         w.token_embedding_table = reader.nextFloatArray(p.vocab_size * p.dim);
         w.rms_att_weight = reader.nextFloatArray(p.n_layers * p.dim);
         w.wq = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
@@ -232,10 +149,7 @@ public class Run {
         }
     }
 
-
-    private static final int THREAD_COUNT = Runtime.getRuntime().availableProcessors();
-
-    private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
+    private static void matmulParallel(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
         int sizePerThread = d / THREAD_COUNT;
         CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
         for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
@@ -266,7 +180,11 @@ public class Run {
         }
     }
 
-    private static void matmulOLD(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
+    private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
+        matmulParallel(xout, x, w, weightIndex, n, d);
+    }
+
+    private static void matmulSimple(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
         // W (d,n) @ x (n,) -> xout (d,)
         // by far the most amount of time is spent inside this little function
         int i;
