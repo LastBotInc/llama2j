@@ -1,0 +1,11 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="stories15M" type="Application" factoryName="Application">
+    <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
+    <module name="llama2j" />
+    <option name="PROGRAM_PARAMETERS" value="--checkpoint stories15M.bin" />
+    <option name="VM_PARAMETERS" value="-Xmx128g -Xms128g --add-modules jdk.incubator.vector" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>
