@@ -429,7 +429,9 @@ public class Run {
         CommandLine commandLine = new CommandLine(args);
 
         Config config = new Config();
-        TransformerWeights weights = new TransformerWeights();
+        TransformerWeights weights = null;
+
+        Context context = new Context(new Target(USE_CPU, USE_CUDA));
 
         // read in the checkpoint file
         long startModelRead = time();
@@ -450,7 +452,7 @@ public class Run {
             boolean shared_weights = config.vocab_size > 0;
             config.vocab_size = abs(config.vocab_size);
 
-            checkPointInitWeights(reader, weights, config, shared_weights);
+            weights = new TransformerWeights(context, reader, config, shared_weights);
         } catch (IOException e) {
             System.exit(1);
         }
@@ -491,7 +493,7 @@ public class Run {
         LLogger.info("Read tokenizer in " + String.format("%.2f", (endTokenizerRead - startTokenizerRead) / 1000d) + " s");
 
         // create and init the application RunState
-        try (RunState state = new RunState(config, new Target(USE_CPU, USE_CUDA))) {
+        try (RunState state = new RunState(context, config)) {
 
             // process the prompt, if any
             int[] prompt_tokens = new int[config.seq_len];
