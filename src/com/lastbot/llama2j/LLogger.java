@@ -31,6 +31,13 @@ public class LLogger {
         print("INFO: " + timeStamp() + " " + message);
     }
 
+    private static final String TIME_NAME_FORMAT = "%-40s";
+
+    public static synchronized void time(String task, long start, long end) {
+        String message = String.format(TIME_NAME_FORMAT, task) + " " + String.format("%,d", (end-start)) + " ms";
+        print("TIME: " + timeStamp() + " " + message);
+    }
+
     public static synchronized void debug(String message) {
         print("DEBUG: " + timeStamp() + " " + message);
     }
