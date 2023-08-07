@@ -19,64 +19,15 @@ import java.util.concurrent.CountDownLatch;
 import static java.lang.Math.abs;
 
 public class Run {
+    private static final boolean USE_CPU = true;
+    private static final boolean USE_CUDA = true;
+
     private static final int THREAD_COUNT = 16;
 
     private static final String MODELS_DIRECTORY = "models";
     private static final String TOKENIZER_FILE = "tokenizer.bin";
 
-    private static int maxCallocSize = 0;
-
     private static final XoRoShiRo128PlusRandom random = new XoRoShiRo128PlusRandom();
-
-    private static float[] calloc(long elements) {
-        if (elements <= Integer.MAX_VALUE) {
-            int size = (int) elements;
-            if (size > maxCallocSize) {
-                maxCallocSize = size;
-            }
-            return new float[size];
-        }
-
-        double ratio = (double) elements / (double) Integer.MAX_VALUE;
-        String s = "Tried to allocate " + String.format("%,d", elements) +
-                " elements, which is " + String.format("%,.1f", ratio) +
-                " times more than supported";
-        LLogger.error(s);
-        System.exit(1);
-        return null;
-    }
-
-    private static RunState mallocRunState(Config p) {
-        RunState s = new RunState();
-        s.x = calloc(p.dim);
-        s.xb = calloc(p.dim);
-        s.xb2 = calloc(p.dim);
-        s.hb = calloc(p.hidden_dim);
-        s.hb2 = calloc(p.hidden_dim);
-        s.q = calloc(p.dim);
-        s.k = calloc(p.dim);
-        s.v = calloc(p.dim);
-        s.att = calloc(p.n_heads * p.seq_len);
-        s.logits = calloc(p.vocab_size);
-        s.key_cache = calloc(p.n_layers * p.seq_len * p.dim);
-        s.value_cache = calloc(p.n_layers * p.seq_len * p.dim);
-        return s;
-    }
-
-    private static void free_run_state(RunState s) {
-//        free(s -> x);
-//        free(s -> xb);
-//        free(s -> xb2);
-//        free(s -> hb);
-//        free(s -> hb2);
-//        free(s -> q);
-//        free(s -> k);
-//        free(s -> v);
-//        free(s -> att);
-//        free(s -> logits);
-//        free(s -> key_cache);
-//        free(s -> value_cache);
-    }
 
     /**
      * initialization: read from checkpoint
@@ -540,82 +491,67 @@ public class Run {
         LLogger.info("Read tokenizer in " + String.format("%.2f", (endTokenizerRead - startTokenizerRead) / 1000d) + " s");
 
         // create and init the application RunState
-        RunState state = mallocRunState(config);
+        try (RunState state = new RunState(config, new Target(USE_CPU, USE_CUDA))) {
 
-        // process the prompt, if any
-        int[] prompt_tokens = new int[config.seq_len];
-        int num_prompt_tokens = 0;
-        if (commandLine.getPrompt() != null) {
-            num_prompt_tokens = bpe_encode(commandLine.getPrompt() , vocab, vocab_scores, max_token_length, prompt_tokens);
-        }
+            // process the prompt, if any
+            int[] prompt_tokens = new int[config.seq_len];
+            int num_prompt_tokens = 0;
+            if (commandLine.getPrompt() != null) {
+                num_prompt_tokens = bpe_encode(commandLine.getPrompt(), vocab, vocab_scores, max_token_length, prompt_tokens);
+            }
 
-        // start the main loop
-        long start = 0;  // used to time our code, only initialized after first iteration
-        int next;        // will store the next token in the sequence
-        int token = 1;   // init with token 1 (=BOS), as done in Llama-2 sentencepiece tokenizer
-        int pos = 0;     // position in the sequence
+            // start the main loop
+            long start = 0;  // used to time our code, only initialized after first iteration
+            int next;        // will store the next token in the sequence
+            int token = 1;   // init with token 1 (=BOS), as done in Llama-2 sentencepiece tokenizer
+            int pos = 0;     // position in the sequence
 
-        Output.emit("<s>\n"); // explicit print the initial BOS token for stylistic symmetry reasons
-        while (pos < steps) {
+            Output.emit("<s>\n"); // explicit print the initial BOS token for stylistic symmetry reasons
+            while (pos < steps) {
 
-            // forward the transformer to get logits for the next token
-            transformer(token, pos, config, state, weights);
+                // forward the transformer to get logits for the next token
+                transformer(token, pos, config, state, weights);
 
-            if (pos < num_prompt_tokens) {
-                // if we are still processing the input prompt, force the next prompt token
-                next = prompt_tokens[pos];
-            } else {
-                // sample the next token
-                if (commandLine.getTemperature() == 0.0f) {
-                    // greedy argmax sampling: take the token with the highest probability
-                    next = argmax(state.logits, config.vocab_size);
+                if (pos < num_prompt_tokens) {
+                    // if we are still processing the input prompt, force the next prompt token
+                    next = prompt_tokens[pos];
                 } else {
-                    // apply the temperature to the logits
-                    for (int q = 0; q < config.vocab_size; q++) {
-                        state.logits[q] /= commandLine.getTemperature() ;
+                    // sample the next token
+                    if (commandLine.getTemperature() == 0.0f) {
+                        // greedy argmax sampling: take the token with the highest probability
+                        next = argmax(state.logits, config.vocab_size);
+                    } else {
+                        // apply the temperature to the logits
+                        for (int q = 0; q < config.vocab_size; q++) {
+                            state.logits[q] /= commandLine.getTemperature();
+                        }
+                        // apply softmax to the logits to get the probabilities for next token
+                        softmax(state.logits, 0, config.vocab_size);
+                        // we sample from this distribution to get the next token
+                        next = sample(state.logits, config.vocab_size);
                     }
-                    // apply softmax to the logits to get the probabilities for next token
-                    softmax(state.logits, 0, config.vocab_size);
-                    // we sample from this distribution to get the next token
-                    next = sample(state.logits, config.vocab_size);
+                }
+
+                // following BOS token (1), sentencepiece decoder strips any leading whitespace (see PR #89)
+                String token_str = (token == 1 && vocab[next].charAt(0) == ' ') ? vocab[next] + 1 : vocab[next];
+                Output.emit(token_str);
+
+                // advance forward
+                token = next;
+                pos++;
+                // init our timer here because the first iteration is slow due to memmap
+                if (start == 0) {
+                    start = time();
                 }
             }
+            Output.emit("\n"); // explicit print the initial BOS token for stylistic symmetry reasons
 
-            // following BOS token (1), sentencepiece decoder strips any leading whitespace (see PR #89)
-            String token_str = (token == 1 && vocab[next].charAt(0) == ' ') ? vocab[next] + 1 : vocab[next];
-            Output.emit(token_str);
+            // report achieved tok/s
+            long end = time();
 
-            // advance forward
-            token = next;
-            pos++;
-            // init our timer here because the first iteration is slow due to memmap
-            if (start == 0) {
-                start = time();
-            }
+            LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (steps - 1) / (double) (end - start) * 1000));
+
+            // closing try-scope triggers memory and file handles cleanup
         }
-        Output.emit("\n"); // explicit print the initial BOS token for stylistic symmetry reasons
-
-        // report achieved tok/s
-        long end = time();
-
-        LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (steps - 1) / (double) (end - start) * 1000));
-
-        // memory and file handles cleanup
-        free_run_state(state);
-//        for (int i = 0; i < config.vocab_size; i++) { free(vocab[i]);
-//        }
-//
-//        free(vocab);
-//
-//        free(vocab_scores);
-//        if (prompt_tokens != NULL)
-//
-//            free(prompt_tokens);
-//        if (data != MAP_FAILED)
-//
-//            munmap(data, file_size);
-//        if (fd != -1)
-//
-//            close(fd);
     }
 }
