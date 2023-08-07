@@ -14,8 +14,7 @@ import static jcuda.runtime.JCuda.*;
 import static jcuda.runtime.cudaError.cudaSuccess;
 import static jcuda.runtime.cudaMemcpyKind.*;
 
-public class CuContext implements Closeable {
-
+public class ContextCUDA implements Closeable {
     static {
         // Initialize the JCuda driver API
         JCuda.setExceptionsEnabled(true);
@@ -23,15 +22,15 @@ public class CuContext implements Closeable {
 
     private final String name;
     private final int deviceId; // device id
-    private final int gpuMem; // max memory usage in GB
+    private final int maxMemoryInGigaBytes; // max memory usage in GB
     private final List<Pointer> memoryPointerList = new ArrayList<>();
     private final cudaStream_t transferStream;
     private final cudaStream_t kernelStream;
 
-    public CuContext(String name, int deviceId, int gpuMem) {
+    public ContextCUDA(String name, int deviceId, int maxMemoryInGigaBytes) {
         this.name = name;
         this.deviceId = deviceId;
-        this.gpuMem = gpuMem;
+        this.maxMemoryInGigaBytes = maxMemoryInGigaBytes;
 
         setDevice();
 
@@ -65,18 +64,22 @@ public class CuContext implements Closeable {
         return targetDeviceArray;
     }
 
-    public Pointer allocateFloatArray(long floatSize) {
-        long byteSize = floatSize * Sizeof.FLOAT;
+    public Pointer allocateFloatArray(long elements) {
+        if (elements <= Limits.FLOAT_ARRAY_MAX_SIZE) {
+            long byteSize = elements * Sizeof.FLOAT;
 
-        setDevice();
+            setDevice();
 
-        // Create device array
-        Pointer newDeviceArray = new Pointer();
-        if (isError(cudaMalloc(newDeviceArray, byteSize))) {
+            // Create device array
+            Pointer newDeviceArray = new Pointer();
+            if (isError(cudaMalloc(newDeviceArray, byteSize))) {
+                return null;
+            }
+            memoryPointerList.add(newDeviceArray);
+            return newDeviceArray;
+        } else {
             return null;
         }
-        memoryPointerList.add(newDeviceArray);
-        return newDeviceArray;
     }
 
     public boolean copyFromHostToDevice(float[] sourceHostArray, Pointer targetDeviceArray) {
@@ -107,7 +110,7 @@ public class CuContext implements Closeable {
     }
 
     public boolean copyFromDeviceToAnotherDevice(Pointer sourceDeviceArray, Pointer targetDeviceArray,
-                                                 CuContext targetContext, float[] hostArray) {
+                                                 ContextCUDA targetContext, float[] hostArray) {
         setDevice();
 
         if (copyFromDeviceToHost(sourceDeviceArray, hostArray)) {
@@ -151,8 +154,8 @@ public class CuContext implements Closeable {
         }
         long t1, t1b, t2, t3, t4, t5, t6, t7;
 
-        try (CuContext context0 = new CuContext("context0", 0, 10);
-             CuContext context1 = new CuContext("context1", 1, 10)) {
+        try (ContextCUDA context0 = new ContextCUDA("context0", 0, 10);
+             ContextCUDA context1 = new ContextCUDA("context1", 1, 10)) {
 
             t1 = System.currentTimeMillis();
             Pointer d1Pointer = context0.allocateFloatArray(TEST_SIZE);
