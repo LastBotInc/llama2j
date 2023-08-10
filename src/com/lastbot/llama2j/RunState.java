@@ -19,8 +19,8 @@ public class RunState implements Closeable {
     float[] att; // buffer for scores/attention values (n_heads, seq_len)
     float[] logits; // output logits
     // kv cache
-    float[] key_cache;   // (layer, seq_len, dim)
-    float[] value_cache; // (layer, seq_len, dim)
+    float[] l_key_cache;   // (layer, seq_len, dim)
+    float[] l_value_cache; // (layer, seq_len, dim)
 
     Pointer xCU;
     Pointer xbCU;
@@ -32,14 +32,36 @@ public class RunState implements Closeable {
     Pointer vCU;
     Pointer attCU;
     Pointer logitsCU;
-    Pointer key_cacheCU;
-    Pointer value_cacheCU;
+    Pointer l_key_cacheCU;
+    Pointer l_value_cacheCU;
 
-    RunState(Context context, Config config) {
+    public static long bytesStatic(Config config) {
+        return (long) Float.BYTES * (
+                ((long) config.dim) +
+                        ((long) config.dim) +
+                        ((long) config.dim) +
+                        ((long) config.hidden_dim) +
+                        ((long) config.hidden_dim) +
+                        ((long) config.dim) +
+                        ((long) config.dim) +
+                        ((long) config.dim) +
+                        ((long) config.n_heads * config.seq_len) +
+                        ((long) config.vocab_size)
+        );
+    }
+
+    public static long bytesPerLayer(Config config) {
+        return (long) Float.BYTES * (
+                ((long) config.seq_len * config.dim) +
+                        ((long) config.seq_len * config.dim)
+        );
+    }
+
+    public RunState(Context context, Config config) {
         this.config = config;
         this.c = context;
 
-        if (context.target.CPU()) {
+        if (context.cpu != null) {
             long t0 = System.currentTimeMillis();
             x = c.cpu.allocateFloatArray(config.dim);
             xb = c.cpu.allocateFloatArray(config.dim);
@@ -51,26 +73,39 @@ public class RunState implements Closeable {
             v = c.cpu.allocateFloatArray(config.dim);
             att = c.cpu.allocateFloatArray((long) config.n_heads * config.seq_len);
             logits = c.cpu.allocateFloatArray(config.vocab_size);
-            key_cache = c.cpu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
-            value_cache = c.cpu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
+            l_key_cache = c.cpu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
+            l_value_cache = c.cpu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
             long t1 = System.currentTimeMillis();
             LLogger.time("Create RunState CPU", t0, t1);
         }
 
-        if (context.target.CUDA()) {
+        if (context.layerAllocation.deviceCount > 0) {
             long t0 = System.currentTimeMillis();
-            xCU = c.cuda.allocateFloatArray(config.dim);
-            xbCU = c.cuda.allocateFloatArray(config.dim);
-            xb2CU = c.cuda.allocateFloatArray(config.dim);
-            hbCU = c.cuda.allocateFloatArray(config.hidden_dim);
-            hb2CU = c.cuda.allocateFloatArray(config.hidden_dim);
-            qCU = c.cuda.allocateFloatArray(config.dim);
-            kCU = c.cuda.allocateFloatArray(config.dim);
-            vCU = c.cuda.allocateFloatArray(config.dim);
-            attCU = c.cuda.allocateFloatArray((long) config.n_heads * config.seq_len);
-            logitsCU = c.cuda.allocateFloatArray(config.vocab_size);
-            key_cacheCU = c.cuda.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
-            value_cacheCU = c.cuda.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
+            for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
+                ContextCUDA cu = c.cudas[dev];
+                int firstLayer = context.layerAllocation.firstLayer[dev];
+                int lastLayer = context.layerAllocation.lastLayer[dev];
+
+                xCU = cu.allocateFloatArray(config.dim);
+                xbCU = cu.allocateFloatArray(config.dim);
+                xb2CU = cu.allocateFloatArray(config.dim);
+                hbCU = cu.allocateFloatArray(config.hidden_dim);
+                hb2CU = cu.allocateFloatArray(config.hidden_dim);
+                qCU = cu.allocateFloatArray(config.dim);
+                kCU = cu.allocateFloatArray(config.dim);
+                vCU = cu.allocateFloatArray(config.dim);
+                attCU = cu.allocateFloatArray((long) config.n_heads * config.seq_len);
+                logitsCU = cu.allocateFloatArray(config.vocab_size);
+
+                int nLayers = lastLayer - firstLayer + 1;
+                int lengthOfLayerData = nLayers * (config.seq_len * config.dim);
+
+                l_key_cacheCU = cu.allocateFloatArray(lengthOfLayerData);
+                l_value_cacheCU = cu.allocateFloatArray(lengthOfLayerData);
+
+//                l_key_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
+//                l_value_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
+            }
             long t1 = System.currentTimeMillis();
             LLogger.time("Create RunState CUDA", t0, t1);
         }
@@ -78,7 +113,13 @@ public class RunState implements Closeable {
 
     @Override
     public void close() {
-        c.cpu.close();
-        c.cuda.close();
+        if (c.cpu != null) {
+            c.cpu.close();
+        }
+        if (c.cudas != null) {
+            for (int i = 0; i < c.cudas.length; i++) {
+                c.cudas[i].close();
+            }
+        }
     }
 }
