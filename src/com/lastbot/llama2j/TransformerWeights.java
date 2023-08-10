@@ -2,6 +2,8 @@ package com.lastbot.llama2j;
 
 import jcuda.Pointer;
 
+import static com.lastbot.llama2j.LayerMemoryUtil.allocateAndCopyLayers;
+
 public class TransformerWeights {
     private final Context context;
     private final Config config;  // token embedding table
@@ -101,15 +103,15 @@ public class TransformerWeights {
                 int firstLayer = context.layerAllocation.firstLayer[dev];
                 int lastLayer = context.layerAllocation.lastLayer[dev];
 
-                l_rms_att_weightCU = allocateAndCopyLayers(cu, l_rms_att_weight, firstLayer, lastLayer);
-                l_wqCU = allocateAndCopyLayers(cu, l_wq, firstLayer, lastLayer);
-                l_wkCU = allocateAndCopyLayers(cu, l_wk, firstLayer, lastLayer);
-                l_wvCU = allocateAndCopyLayers(cu, l_wv, firstLayer, lastLayer);
-                l_woCU = allocateAndCopyLayers(cu, l_wo, firstLayer, lastLayer);
-                l_rms_ffn_weightCU = allocateAndCopyLayers(cu, l_rms_ffn_weight, firstLayer, lastLayer);
-                l_w1CU = allocateAndCopyLayers(cu, l_w1, firstLayer, lastLayer);
-                l_w2CU = allocateAndCopyLayers(cu, l_w2, firstLayer, lastLayer);
-                l_w3CU = allocateAndCopyLayers(cu, l_w3, firstLayer, lastLayer);
+                l_rms_att_weightCU = allocateAndCopyLayers(cu, l_rms_att_weight, firstLayer, lastLayer, config.n_layers);
+                l_wqCU = allocateAndCopyLayers(cu, l_wq, firstLayer, lastLayer, config.n_layers);
+                l_wkCU = allocateAndCopyLayers(cu, l_wk, firstLayer, lastLayer, config.n_layers);
+                l_wvCU = allocateAndCopyLayers(cu, l_wv, firstLayer, lastLayer, config.n_layers);
+                l_woCU = allocateAndCopyLayers(cu, l_wo, firstLayer, lastLayer, config.n_layers);
+                l_rms_ffn_weightCU = allocateAndCopyLayers(cu, l_rms_ffn_weight, firstLayer, lastLayer, config.n_layers);
+                l_w1CU = allocateAndCopyLayers(cu, l_w1, firstLayer, lastLayer, config.n_layers);
+                l_w2CU = allocateAndCopyLayers(cu, l_w2, firstLayer, lastLayer, config.n_layers);
+                l_w3CU = allocateAndCopyLayers(cu, l_w3, firstLayer, lastLayer, config.n_layers);
 //                l_rms_att_weightCU = cu.allocateAndCopyToDevice(l_rms_att_weight);
 //                l_wqCU = cu.allocateAndCopyToDevice(l_wq);
 //                l_wkCU = cu.allocateAndCopyToDevice(l_wk);
@@ -129,23 +131,4 @@ public class TransformerWeights {
         }
     }
 
-    private Pointer allocateAndCopyLayers(ContextCUDA cu, float[] cpuArray, int firstLayer, int lastLayer) {
-        int floatOffset = layerFloatOffset(cpuArray, firstLayer);
-        int floatSize = layerFloatSize(cpuArray, firstLayer, lastLayer);
-
-        Pointer pointer = cu.allocateAndCopyToDeviceWithOffset(cpuArray, floatOffset, floatSize);
-        return pointer;
-    }
-
-    private int layerFloatOffset(float[] cpuArray, int firstLayer) {
-        int bytesPerLayer = cpuArray.length / config.n_layers;
-        int offset = firstLayer * bytesPerLayer;
-        return offset;
-    }
-
-    private int layerFloatSize(float[] cpuArray, int firstLayer, int lastLayer) {
-        int bytesPerLayer = cpuArray.length / config.n_layers;
-        int size = (lastLayer - firstLayer + 1) * bytesPerLayer;
-        return size;
-    }
 }
