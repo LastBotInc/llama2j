@@ -38,15 +38,15 @@ public class Run {
      */
     private static void checkPointInitWeights(BinFileReader reader, TransformerWeights w, Config p, boolean sharedWeights) {
         w.token_embedding_table = reader.nextFloatArray(p.vocab_size * p.dim);
-        w.rms_att_weight = reader.nextFloatArray(p.n_layers * p.dim);
-        w.wq = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-        w.wk = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-        w.wv = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-        w.wo = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-        w.rms_ffn_weight = reader.nextFloatArray(p.n_layers * p.dim);
-        w.w1 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
-        w.w2 = reader.nextFloatArray(p.n_layers * p.hidden_dim * p.dim);
-        w.w3 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
+        w.l_rms_att_weight = reader.nextFloatArray(p.n_layers * p.dim);
+        w.l_wq = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
+        w.l_wk = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
+        w.l_wv = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
+        w.l_wo = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
+        w.l_rms_ffn_weight = reader.nextFloatArray(p.n_layers * p.dim);
+        w.l_w1 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
+        w.l_w2 = reader.nextFloatArray(p.n_layers * p.hidden_dim * p.dim);
+        w.l_w3 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
         w.rms_final_weight = reader.nextFloatArray(p.dim);
         int head_size = p.dim / p.n_heads;
         w.freq_cis_real = reader.nextFloatArray(p.seq_len * head_size / 2);
@@ -167,15 +167,15 @@ public class Run {
 //        float*freq_cis_imag_row = w.freq_cis_imag + pos * head_size / 2;
 
         // forward all the layers
-        for (int l = 0; l < p.n_layers; l++) {
+        for (int layer = 0; layer < p.n_layers; layer++) {
 
             // attention rmsnorm
-            rmsnorm(s.xb, x, w.rms_att_weight, l * dim, dim);
+            rmsnorm(s.xb, x, w.l_rms_att_weight, layer * dim, dim);
 
             // qkv matmuls for this position
-            matmul(s.q, s.xb, w.wq, l * dim * dim, dim, dim);
-            matmul(s.k, s.xb, w.wk, l * dim * dim, dim, dim);
-            matmul(s.v, s.xb, w.wv, l * dim * dim, dim, dim);
+            matmul(s.q, s.xb, w.l_wq, layer * dim * dim, dim, dim);
+            matmul(s.k, s.xb, w.l_wk, layer * dim * dim, dim, dim);
+            matmul(s.v, s.xb, w.l_wv, layer * dim * dim, dim, dim);
 
             // apply RoPE rotation to the q and k vectors for each head
             for (int h = 0; h < p.n_heads; h++) {
@@ -199,16 +199,16 @@ public class Run {
             }
 
             // save key,value at this time step (pos) to our kv cache
-            int loff = l * p.seq_len * dim; // kv cache layer offset for convenience
+            int loff = layer * p.seq_len * dim; // kv cache layer offset for convenience
 //            float*key_cache_row = s.key_cache + loff + pos * dim;
 //            memcpy(key_cache_row, s -> k, dim * sizeof( * key_cache_row));
 
-            System.arraycopy(s.k, 0, s.key_cache, loff + pos * dim, dim);
+            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * dim, dim);
 
 //            float*value_cache_row = s.value_cache + loff + pos * dim;
 //            memcpy(value_cache_row, s -> v, dim * sizeof( * value_cache_row));
 
-            System.arraycopy(s.v, 0, s.value_cache, loff + pos * dim, dim);
+            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * dim, dim);
 
             // multihead attention. iterate over all heads
             int h;
@@ -227,7 +227,7 @@ public class Run {
                     // calculate the attention score as the dot product of q and k
                     float score = 0.0f;
                     for (int i = 0; i < head_size; i++) {
-                        score += s.q[queryIndex + i] * s.key_cache[keyIndex + i];
+                        score += s.q[queryIndex + i] * s.l_key_cache[keyIndex + i];
                     }
                     score /= (float) Math.sqrt(head_size);
                     // save the score to the attention buffer
@@ -252,24 +252,24 @@ public class Run {
                     float a = s.att[attentionIndex + t];
                     // accumulate the weighted value into xb
                     for (int i = 0; i < head_size; i++) {
-                        s.xb[xbIndex + i] += a * s.value_cache[vIndex + i];
+                        s.xb[xbIndex + i] += a * s.l_value_cache[vIndex + i];
                     }
                 }
             }
 
             // final matmul to get the output of the attention
-            matmul(s.xb2, s.xb, w.wo, l * dim * dim, dim, dim);
+            matmul(s.xb2, s.xb, w.l_wo, layer * dim * dim, dim, dim);
 
             // residual connection back into x
             accum(x, s.xb2, dim);
 
             // ffn rmsnorm
-            rmsnorm(s.xb, x, w.rms_ffn_weight, l * dim, dim);
+            rmsnorm(s.xb, x, w.l_rms_ffn_weight, layer * dim, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            matmul(s.hb, s.xb, w.w1, l * dim * hidden_dim, dim, hidden_dim);
-            matmul(s.hb2, s.xb, w.w3, l * dim * hidden_dim, dim, hidden_dim);
+            matmul(s.hb, s.xb, w.l_w1, layer * dim * hidden_dim, dim, hidden_dim);
+            matmul(s.hb2, s.xb, w.l_w3, layer * dim * hidden_dim, dim, hidden_dim);
 
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
             for (int i = 0; i < hidden_dim; i++) {
@@ -282,11 +282,11 @@ public class Run {
             }
 
             // final matmul to get the output of the ffn
-            matmul(s.xb, s.hb, w.w2, l * dim * hidden_dim, hidden_dim, dim);
+            matmul(s.xb, s.hb, w.l_w2, layer * dim * hidden_dim, hidden_dim, dim);
 
             // residual connection
             accum(x, s.xb, dim);
-        }
+        } // layers
 
         // final rmsnorm
         rmsnorm(x, x, w.rms_final_weight, 0, dim);
@@ -428,14 +428,17 @@ public class Run {
 
         CommandLine commandLine = new CommandLine(args);
 
+        Target target = new Target(USE_CPU, USE_CUDA);
+
         Config config = new Config();
         TransformerWeights weights = null;
-
-        Context context = new Context(new Target(USE_CPU, USE_CUDA));
 
         // read in the checkpoint file
         long startModelRead = time();
         LLogger.info("Start reading checkpoint " + commandLine.getCheckpoint());
+
+        LayerAllocation layerAllocation;
+        Context context = null;
 
         try (BinFileReader reader =
                      new BinFileReader(MODELS_DIRECTORY + File.separator + commandLine.getCheckpoint())) {
@@ -452,10 +455,19 @@ public class Run {
             boolean shared_weights = config.vocab_size > 0;
             config.vocab_size = abs(config.vocab_size);
 
+            LLogger.info(config.toString());
+
+            layerAllocation = new LayerAllocation(commandLine.getGpuMem(), config, target, shared_weights);
+
+            context = new Context(layerAllocation);
+
             weights = new TransformerWeights(context, reader, config, shared_weights);
         } catch (IOException e) {
             System.exit(1);
         }
+
+        RunState state = new RunState(context, config);
+
 
         long endModelRead = time();
 
@@ -493,67 +505,66 @@ public class Run {
         LLogger.info("Read tokenizer in " + String.format("%.2f", (endTokenizerRead - startTokenizerRead) / 1000d) + " s");
 
         // create and init the application RunState
-        try (RunState state = new RunState(context, config)) {
-
-            // process the prompt, if any
-            int[] prompt_tokens = new int[config.seq_len];
-            int num_prompt_tokens = 0;
-            if (commandLine.getPrompt() != null) {
-                num_prompt_tokens = bpe_encode(commandLine.getPrompt(), vocab, vocab_scores, max_token_length, prompt_tokens);
-            }
-
-            // start the main loop
-            long start = 0;  // used to time our code, only initialized after first iteration
-            int next;        // will store the next token in the sequence
-            int token = 1;   // init with token 1 (=BOS), as done in Llama-2 sentencepiece tokenizer
-            int pos = 0;     // position in the sequence
-
-            Output.emit("<s>\n"); // explicit print the initial BOS token for stylistic symmetry reasons
-            while (pos < steps) {
-
-                // forward the transformer to get logits for the next token
-                transformer(token, pos, config, state, weights);
-
-                if (pos < num_prompt_tokens) {
-                    // if we are still processing the input prompt, force the next prompt token
-                    next = prompt_tokens[pos];
-                } else {
-                    // sample the next token
-                    if (commandLine.getTemperature() == 0.0f) {
-                        // greedy argmax sampling: take the token with the highest probability
-                        next = argmax(state.logits, config.vocab_size);
-                    } else {
-                        // apply the temperature to the logits
-                        for (int q = 0; q < config.vocab_size; q++) {
-                            state.logits[q] /= commandLine.getTemperature();
-                        }
-                        // apply softmax to the logits to get the probabilities for next token
-                        softmax(state.logits, 0, config.vocab_size);
-                        // we sample from this distribution to get the next token
-                        next = sample(state.logits, config.vocab_size);
-                    }
-                }
-
-                // following BOS token (1), sentencepiece decoder strips any leading whitespace (see PR #89)
-                String token_str = (token == 1 && vocab[next].charAt(0) == ' ') ? vocab[next] + 1 : vocab[next];
-                Output.emit(token_str);
-
-                // advance forward
-                token = next;
-                pos++;
-                // init our timer here because the first iteration is slow due to memmap
-                if (start == 0) {
-                    start = time();
-                }
-            }
-            Output.emit("\n"); // explicit print the initial BOS token for stylistic symmetry reasons
-
-            // report achieved tok/s
-            long end = time();
-
-            LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (steps - 1) / (double) (end - start) * 1000));
-
-            // closing try-scope triggers memory and file handles cleanup
+        // process the prompt, if any
+        int[] prompt_tokens = new int[config.seq_len];
+        int num_prompt_tokens = 0;
+        if (commandLine.getPrompt() != null) {
+            num_prompt_tokens = bpe_encode(commandLine.getPrompt(), vocab, vocab_scores, max_token_length, prompt_tokens);
         }
+
+        // start the main loop
+        long start = 0;  // used to time our code, only initialized after first iteration
+        int next;        // will store the next token in the sequence
+        int token = 1;   // init with token 1 (=BOS), as done in Llama-2 sentencepiece tokenizer
+        int pos = 0;     // position in the sequence
+
+        Output.emit("<s>\n"); // explicit print the initial BOS token for stylistic symmetry reasons
+        while (pos < steps) {
+
+            // forward the transformer to get logits for the next token
+            transformer(token, pos, config, state, weights);
+
+            if (pos < num_prompt_tokens) {
+                // if we are still processing the input prompt, force the next prompt token
+                next = prompt_tokens[pos];
+            } else {
+                // sample the next token
+                if (commandLine.getTemperature() == 0.0f) {
+                    // greedy argmax sampling: take the token with the highest probability
+                    next = argmax(state.logits, config.vocab_size);
+                } else {
+                    // apply the temperature to the logits
+                    for (int q = 0; q < config.vocab_size; q++) {
+                        state.logits[q] /= commandLine.getTemperature();
+                    }
+                    // apply softmax to the logits to get the probabilities for next token
+                    softmax(state.logits, 0, config.vocab_size);
+                    // we sample from this distribution to get the next token
+                    next = sample(state.logits, config.vocab_size);
+                }
+            }
+
+            // following BOS token (1), sentencepiece decoder strips any leading whitespace (see PR #89)
+            String token_str = (token == 1 && vocab[next].charAt(0) == ' ') ? vocab[next] + 1 : vocab[next];
+            Output.emit(token_str);
+
+            // advance forward
+            token = next;
+            pos++;
+            // init our timer here because the first iteration is slow due to memmap
+            if (start == 0) {
+                start = time();
+            }
+        }
+        Output.emit("\n"); // explicit print the initial BOS token for stylistic symmetry reasons
+
+        state.close();
+
+        // report achieved tok/s
+        long end = time();
+
+        LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (steps - 1) / (double) (end - start) * 1000));
+
+        // closing try-scope triggers memory and file handles cleanup
     }
 }
