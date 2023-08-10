@@ -1,17 +1,12 @@
 package com.lastbot.llama2j;
 
 import java.io.Closeable;
-import java.io.IOException;
 
 public class ContextCPU implements Closeable {
     private final String name;
-    private final int deviceId;
-    private final int maxMemoryInGigaBytes;
 
-    public ContextCPU(String name, int deviceId, int maxMemoryInGigaBytes) {
+    public ContextCPU(String name) {
         this.name = name;
-        this.deviceId = deviceId;
-        this.maxMemoryInGigaBytes = maxMemoryInGigaBytes;
     }
 
     public float[] allocateFloatArray(long elements) {
