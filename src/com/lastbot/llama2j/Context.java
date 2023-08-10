@@ -1,14 +1,16 @@
 package com.lastbot.llama2j;
 
 public class Context {
-    final ContextCUDA cuda;
+    final LayerAllocation layerAllocation;
+    final ContextCUDA[] cudas;
     final ContextCPU cpu;
 
-    final Target target;
-
-    public Context(Target target) {
-        this.target = target;
-        this.cpu = target.CPU() ? new ContextCPU("contextCPU0", 0, 20) : null;
-        this.cuda = target.CUDA() ? new ContextCUDA("contextCUDA0", 0, 20) : null;
+    public Context(LayerAllocation layerAllocation) {
+        this.cpu = layerAllocation.hasCPULayers() ? new ContextCPU("contextCPU0") : null;
+        this.cudas = new ContextCUDA[layerAllocation.deviceCount];
+        this.layerAllocation = layerAllocation;
+        for (int dev = 0; dev < layerAllocation.deviceCount; dev++) {
+            this.cudas[dev] = new ContextCUDA("contextCUDA0", dev);
+        }
     }
 }
