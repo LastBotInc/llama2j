@@ -17,7 +17,9 @@ public class CommandLine {
     private int steps = 256;          // max number of steps to run for, 0: use seq_len
     private String prompt = "One day, Lily met a Shoggoth";      // prompt string
 
-    private int[] gpuMem = null;
+    private long GIGA = 1024L * 1024L * 1024L;
+
+    private long[] gpuMem = null;
 
     public CommandLine(String[] args) throws IllegalArgumentException {
         Map<String, String> arguments = new HashMap<>();
@@ -57,16 +59,19 @@ public class CommandLine {
 
             if (arguments.containsKey(GPU)) {
                 String gpuString = arguments.get(GPU);
-                List<Integer> memoryList = new ArrayList<>();
+                List<Long> memoryList = new ArrayList<>();
                 for (String device : gpuString.split(",")) {
                     int memory = Integer.parseInt(device.trim());
-                    memoryList.add(memory);
+                    memoryList.add(memory * GIGA);
                 }
-                gpuMem = new int[memoryList.size()];
-                String s = "";
+                gpuMem = new long[memoryList.size()];
+                StringBuilder s = new StringBuilder();
                 for (int i = 0; i < memoryList.size(); i++) {
                     gpuMem[i] = memoryList.get(i);
-                    s += gpuMem[i] + (i < memoryList.size() - 1 ? "," : "");
+                    s.append(String.format("%,d", gpuMem[i] / GIGA));
+                    if (i < memoryList.size() - 1) {
+                        s.append(",");
+                    }
                 }
                 LLogger.info(GPU + " " + s);
             } else {
@@ -95,7 +100,7 @@ public class CommandLine {
         return prompt;
     }
 
-    public int[] getGpuMem() {
+    public long[] getGpuMem() {
         return gpuMem;
     }
 
