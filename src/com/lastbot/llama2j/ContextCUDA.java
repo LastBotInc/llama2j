@@ -9,7 +9,6 @@ import java.io.Closeable;
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.lastbot.llama2j.Limits.FLOAT_ARRAY_MAX_SIZE;
 import static jcuda.runtime.JCuda.*;
 import static jcuda.runtime.cudaError.cudaSuccess;
 import static jcuda.runtime.cudaMemcpyKind.*;
@@ -22,15 +21,13 @@ public class ContextCUDA implements Closeable {
 
     private final String name;
     private final int deviceId; // device id
-    private final int maxMemoryInGigaBytes; // max memory usage in GB
     private final List<Pointer> memoryPointerList = new ArrayList<>();
     private final cudaStream_t transferStream;
     private final cudaStream_t kernelStream;
 
-    public ContextCUDA(String name, int deviceId, int maxMemoryInGigaBytes) {
+    public ContextCUDA(String name, int deviceId) {
         this.name = name;
         this.deviceId = deviceId;
-        this.maxMemoryInGigaBytes = maxMemoryInGigaBytes;
 
         setDevice();
 
@@ -59,6 +56,22 @@ public class ContextCUDA implements Closeable {
 
         // Asynchronous copy from host to device
         if (isError(cudaMemcpyAsync(targetDeviceArray, Pointer.to(hostArray), byteSize, cudaMemcpyHostToDevice, transferStream))) {
+            return null;
+        }
+        return targetDeviceArray;
+    }
+
+    public Pointer allocateAndCopyToDeviceWithOffset(float[] hostArray, int offset, int size) {
+        Pointer targetDeviceArray = allocateFloatArray(size);
+
+        Pointer hostArrayOffset = Pointer.to(hostArray).withByteOffset((long) offset * Float.BYTES);
+
+        long byteSize = (long) (size) * Sizeof.FLOAT;
+
+        setDevice();
+
+        // Asynchronous copy from host to device
+        if (isError(cudaMemcpyAsync(targetDeviceArray, hostArrayOffset, byteSize, cudaMemcpyHostToDevice, transferStream))) {
             return null;
         }
         return targetDeviceArray;
@@ -143,7 +156,9 @@ public class ContextCUDA implements Closeable {
         return false;
     }
 
-    private static final int TEST_SIZE = FLOAT_ARRAY_MAX_SIZE;
+    //    private static final int TEST_SIZE = FLOAT_ARRAY_MAX_SIZE;
+//    private static final int TEST_SIZE = 576_512; // estimated for LLama 2, 7B
+    private static final int TEST_SIZE = 2 * 576_512; // estimated for LLama 2, 70B; dim = 4096, seq_len = 4096
 
     private static void test() {
         float[] d1 = new float[TEST_SIZE];
@@ -154,8 +169,8 @@ public class ContextCUDA implements Closeable {
         }
         long t1, t1b, t2, t3, t4, t5, t6, t7;
 
-        try (ContextCUDA context0 = new ContextCUDA("context0", 0, 10);
-             ContextCUDA context1 = new ContextCUDA("context1", 1, 10)) {
+        try (ContextCUDA context0 = new ContextCUDA("context0", 0);
+             ContextCUDA context1 = new ContextCUDA("context1", 1)) {
 
             t1 = System.currentTimeMillis();
             Pointer d1Pointer = context0.allocateFloatArray(TEST_SIZE);
