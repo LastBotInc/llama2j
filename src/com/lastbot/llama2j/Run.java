@@ -22,7 +22,7 @@ public class Run {
     private static final boolean USE_CPU = true;
     private static final boolean USE_CUDA = true;
 
-    private static final int THREAD_COUNT = 16;
+    private static final int THREAD_COUNT = 8;
 
     private static final String MODELS_DIRECTORY = "models";
     private static final String TOKENIZER_FILE = "tokenizer.bin";
