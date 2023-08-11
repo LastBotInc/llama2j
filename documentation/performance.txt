@@ -20,59 +20,18 @@ achieved tok/s: 25.9 (3.5%)
 
 THREAD_COUNT = 8;
 --checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
-achieved tok/s: 1.2 (10.7%)
+achieved tok/s: 1.5 (13.4%)
 
 THREAD_COUNT = 16;
 --checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
-achieved tok/s: 2.0 (17.9%)
+achieved tok/s: 2.8 (17.9%)
 
 THREAD_COUNT = 32;
 --checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
-achieved tok/s: 2.3 (20.5%)
+achieved tok/s: 4.6 (41%)
+
+THREAD_COUNT = 64;
+--checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
+achieved tok/s: 2.7 (24.1%)
 
 ----------------
-
-// faulty metrics below, see run.c
-
-
-./run stories15M.bin
-achieved tok/s: 107.007973
-
-./run stories42M.bin
-achieved tok/s: 36.470252
-
-./run stories42M.bin 1.0 256 "One day, Lily met a Shoggoth"
-achieved tok/s: 36.454610
-
-MP_NUM_THREADS=64 ./run llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth"
-achieved tok/s: 10.544597
-
-Java stories15M.bin
-achieved tok/s: 99.6
-
-llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth"
-achieved tok/s: 0.2
-
-Parallel matmul:
-
-llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth", 64 threads
-achieved tok/s: 1.5
-
-llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth", 32 threads
-achieved tok/s: 2.3
-
-llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth", 16 threads
-achieved tok/s: 2.1
-
-llama2_7b.bin 1.0 256 "One day, Lily met a Shoggoth", 8 threads
-achieved tok/s: 1.3
-
--------
-
-BinFileReader
-Read model in 18.50 s
-Read model in 0.01 s
-
-FastBinFileReader
-Read model in 3.94 s
-INFO: 2023-07-31 19:21:05 Read tokenizer in 0.01 s

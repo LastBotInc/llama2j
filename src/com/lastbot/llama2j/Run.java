@@ -14,7 +14,7 @@ import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.*;
 
 import static java.lang.Math.abs;
 
@@ -22,7 +22,7 @@ public class Run {
     private static final boolean USE_CPU = true;
     private static final boolean USE_CUDA = true;
 
-    private static final int THREAD_COUNT = 8;
+    private static final int THREAD_COUNT = 32;
 
     private static final String MODELS_DIRECTORY = "models";
     private static final String TOKENIZER_FILE = "tokenizer.bin";
@@ -100,7 +100,17 @@ public class Run {
         }
     }
 
+    private static BlockingQueue<Runnable> queue;
+    private static RejectedExecutionHandler handler;
+    private static ExecutorService executor;
+
     private static void matmulParallel(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
+        if (executor == null) {
+            queue = new ArrayBlockingQueue<>(THREAD_COUNT, false);
+            handler = new ThreadPoolExecutor.CallerRunsPolicy();
+            executor = new ThreadPoolExecutor(THREAD_COUNT, THREAD_COUNT, 60L, TimeUnit.SECONDS, queue, handler);
+        }
+
         int sizePerThread = d / THREAD_COUNT;
         CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
         for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
@@ -108,7 +118,7 @@ public class Run {
             final int end = Math.min(d, (threadId + 1) * sizePerThread);
 //            LLogger.debug(">>> d " + d + ", n " + n);
             int finalThreadId = threadId;
-            new Thread(() -> {
+            executor.execute(() -> {
                 try {
                     float val;
                     for (int i = finalThreadId * sizePerThread; i < end; i++) {
@@ -122,7 +132,7 @@ public class Run {
                 } finally {
                     latch.countDown();
                 }
-            }).start();
+            });
         }
         try {
             latch.await();
