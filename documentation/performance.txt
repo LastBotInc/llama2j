@@ -1,4 +1,15 @@
 ./run stories15M.bin
+achieved tok/s: 35.6
+
+
+
+
+----------------
+
+// faulty metrics below, see run.c
+
+
+./run stories15M.bin
 achieved tok/s: 107.007973
 
 ./run stories42M.bin
