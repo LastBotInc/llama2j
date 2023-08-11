@@ -27,7 +27,7 @@ public class Run {
     private static final String MODELS_DIRECTORY = "models";
     private static final String TOKENIZER_FILE = "tokenizer.bin";
 
-    private static final XoRoShiRo128PlusRandom random = new XoRoShiRo128PlusRandom();
+    private static XoRoShiRo128PlusRandom random;
 
     /**
      * initialization: read from checkpoint
@@ -162,9 +162,7 @@ public class Run {
         System.arraycopy(w.token_embedding_table, token * dim, x, 0, dim);
 
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
-        int freqCisIndex = pos * head_size / 2;
-//        float*freq_cis_real_row = w.freq_cis_real + pos * head_size / 2;
-//        float*freq_cis_imag_row = w.freq_cis_imag + pos * head_size / 2;
+        int freq_cis_imag_row = pos * head_size / 2;
 
         // forward all the layers
         for (int layer = 0; layer < p.n_layers; layer++) {
@@ -177,25 +175,19 @@ public class Run {
             matmul(s.k, s.xb, w.l_wk, layer * dim * dim, dim, dim);
             matmul(s.v, s.xb, w.l_wv, layer * dim * dim, dim, dim);
 
-            // apply RoPE rotation to the q and k vectors for each head
-            for (int h = 0; h < p.n_heads; h++) {
-                int headIndex = h * head_size;
-                // get the q and k vectors for this head
-//                float[] q = s.q + h * head_size;
-//                float[] k = s.k + h * head_size;
-                // rotate q and k by the freq_cis_real and freq_cis_imag
-                for (int i = 0; i < head_size; i += 2) {
-                    float q0 = s.q[headIndex + i];
-                    float q1 = s.q[headIndex + i + 1];
-                    float k0 = s.k[headIndex + i];
-                    float k1 = s.k[headIndex + i + 1];
-                    float fcr = w.freq_cis_real[freqCisIndex + i / 2];
-                    float fci = w.freq_cis_imag[freqCisIndex + i / 2];
-                    s.q[headIndex + i] = q0 * fcr - q1 * fci;
-                    s.q[headIndex + i + 1] = q0 * fci + q1 * fcr;
-                    s.k[headIndex + i] = k0 * fcr - k1 * fci;
-                    s.k[headIndex + i + 1] = k0 * fci + k1 * fcr;
-                }
+            // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
+            for (int i = 0; i < dim; i += 2) {
+                float q0 = s.q[i];
+                float q1 = s.q[i + 1];
+                float k0 = s.k[i];
+                float k1 = s.k[i + 1];
+                int freq_cis_imag_index = freq_cis_imag_row + (i % head_size) / 2;
+                float fcr = w.freq_cis_real[freq_cis_imag_index];
+                float fci = w.freq_cis_imag[freq_cis_imag_index];
+                s.q[i] = q0 * fcr - q1 * fci;
+                s.q[i + 1] = q0 * fci + q1 * fcr;
+                s.k[i] = k0 * fcr - k1 * fci;
+                s.k[i + 1] = k0 * fci + k1 * fcr;
             }
 
             // save key,value at this time step (pos) to our kv cache
@@ -398,7 +390,11 @@ public class Run {
         return random.nextFloat();
     }
 
-    private static int sample(float[] probabilities, int n) {
+// ----------------------------------------------------------------------------
+// sampling can be done in a few ways: greedy argmax, sampling, top-p sampling
+
+    private static int sample(RunState state, int n) {
+        float[] probabilities = state.logits;
         // sample index from probabilities, they must sum to 1
         float r = random_f32();
         float cdf = 0.0f;
@@ -424,9 +420,53 @@ public class Run {
         return max_i;
     }
 
+    static int sample_topp(RunState state, int n, float topp) {
+        // top-p sampling (or "nucleus sampling") samples from the smallest set of
+        // tokens that exceed probability topp. This way we never sample tokens that
+        // have very low probabilities and are less likely to go "off the rails".
+
+        float[] probabilities = state.logits;
+
+        // quicksort indices in descending order of probabilities
+        for (int i = 0; i < n; i++) {
+            state.probIndex[i].index = i;
+            state.probIndex[i].prob = probabilities[i];
+        }
+
+        Arrays.sort(state.probIndex);
+
+        // truncate the list where cumulative probability exceeds topp
+        float cumulative_prob = 0.0f;
+        int last_idx = 0;
+        for (int i = 0; i < n; i++) {
+            cumulative_prob += state.probIndex[i].prob;
+            if (cumulative_prob > topp) {
+                last_idx = i;
+                break; // we've exceeded topp by including last_idx
+            }
+        }
+
+        // sample from the truncated list
+        float r = random_f32() * cumulative_prob;
+        float cdf = 0.0f;
+        for (int i = 0; i <= last_idx; i++) {
+            cdf += state.probIndex[i].prob;
+            if (r < cdf) {
+                return state.probIndex[i].index;
+            }
+        }
+        return state.probIndex[last_idx].index; // in case of rounding errors
+    }
+
     public static void main(String[] args) {
 
         CommandLine commandLine = new CommandLine(args);
+
+        Long rngSeed = commandLine.getSeed();
+        if (rngSeed == null) {
+            rngSeed = time();
+        }
+        random = new XoRoShiRo128PlusRandom(rngSeed);
 
         Target target = new Target(USE_CPU, USE_CUDA);
 
@@ -504,11 +544,11 @@ public class Run {
 
         LLogger.info("Read tokenizer in " + String.format("%.2f", (endTokenizerRead - startTokenizerRead) / 1000d) + " s");
 
-        // create and init the application RunState
         // process the prompt, if any
-        int[] prompt_tokens = new int[config.seq_len];
+        int promptLength = commandLine.getPrompt() != null ? commandLine.getPrompt().length() : 0;
+        int[] prompt_tokens = new int[promptLength];
         int num_prompt_tokens = 0;
-        if (commandLine.getPrompt() != null) {
+        if (promptLength > 0) {
             num_prompt_tokens = bpe_encode(commandLine.getPrompt(), vocab, vocab_scores, max_token_length, prompt_tokens);
         }
 
@@ -518,12 +558,12 @@ public class Run {
         int token = 1;   // init with token 1 (=BOS), as done in Llama-2 sentencepiece tokenizer
         int pos = 0;     // position in the sequence
 
-        Output.emit("<s>\n"); // explicit print the initial BOS token for stylistic symmetry reasons
         while (pos < steps) {
 
             // forward the transformer to get logits for the next token
             transformer(token, pos, config, state, weights);
 
+            // advance the state machine
             if (pos < num_prompt_tokens) {
                 // if we are still processing the input prompt, force the next prompt token
                 next = prompt_tokens[pos];
@@ -539,31 +579,42 @@ public class Run {
                     }
                     // apply softmax to the logits to get the probabilities for next token
                     softmax(state.logits, 0, config.vocab_size);
-                    // we sample from this distribution to get the next token
-                    next = sample(state.logits, config.vocab_size);
+                    if (commandLine.getTopp() == null) {
+                        // we sample from this distribution to get the next token
+                        next = sample(state, config.vocab_size);
+                    } else {
+                        // top-p (nucleus) sampling, clamping the least likely tokens to zero
+                        next = sample_topp(state, config.vocab_size, commandLine.getTopp());
+                    }
                 }
             }
+            pos++;
 
+            // data-dependent terminating condition: the BOS (1) token delimits sequences
+            if (next == 1) {
+                break;
+            }
             // following BOS token (1), sentencepiece decoder strips any leading whitespace (see PR #89)
             String token_str = (token == 1 && vocab[next].charAt(0) == ' ') ? vocab[next] + 1 : vocab[next];
             Output.emit(token_str);
 
-            // advance forward
             token = next;
-            pos++;
-            // init our timer here because the first iteration is slow due to memmap
+
+            // init our timer here
             if (start == 0) {
                 start = time();
             }
         }
         Output.emit("\n"); // explicit print the initial BOS token for stylistic symmetry reasons
 
-        state.close();
-
         // report achieved tok/s
         long end = time();
 
-        LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (steps - 1) / (double) (end - start) * 1000));
+        state.close();
+
+        if (pos > 1) {
+            LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (pos - 1) / (double) (end - start) * 1000));
+        }
 
         // closing try-scope triggers memory and file handles cleanup
     }
