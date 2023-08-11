@@ -5,6 +5,23 @@ import jcuda.Pointer;
 import java.io.Closeable;
 
 public class RunState implements Closeable {
+    // struct used when sorting probabilities during top-p sampling, CPU only
+    public static class ProbIndex implements Comparable<ProbIndex> {
+        public float prob;
+        public int index;
+
+        @Override
+        public int compareTo(ProbIndex o) {
+            if (prob > o.prob) {
+                return -1;
+            } else if (prob < o.prob) {
+                return 1;
+            } else {
+                return 0;
+            }
+        }
+    }
+
     private final Context c;
     private final Config config;
     // current wave of activations
@@ -18,9 +35,12 @@ public class RunState implements Closeable {
     float[] v; // value (dim,)
     float[] att; // buffer for scores/attention values (n_heads, seq_len)
     float[] logits; // output logits
+
     // kv cache
     float[] l_key_cache;   // (layer, seq_len, dim)
     float[] l_value_cache; // (layer, seq_len, dim)
+
+    ProbIndex[] probIndex; // buffer used in top-p sampling, CPU only
 
     Pointer xCU;
     Pointer xbCU;
@@ -47,6 +67,7 @@ public class RunState implements Closeable {
                         ((long) config.dim) +
                         ((long) config.n_heads * config.seq_len) +
                         ((long) config.vocab_size)
+                // omit probIndex, as it is currently only CPU
         );
     }
 
@@ -73,6 +94,7 @@ public class RunState implements Closeable {
             v = c.cpu.allocateFloatArray(config.dim);
             att = c.cpu.allocateFloatArray((long) config.n_heads * config.seq_len);
             logits = c.cpu.allocateFloatArray(config.vocab_size);
+            probIndex = new ProbIndex[config.vocab_size];
             l_key_cache = c.cpu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
             l_value_cache = c.cpu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
             long t1 = System.currentTimeMillis();
