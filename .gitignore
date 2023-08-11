@@ -31,3 +31,6 @@ bin/
 models
 
 .attach_pid*
+
+src/cuda/cmake-build-debug
+
