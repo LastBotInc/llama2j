@@ -37,7 +37,7 @@ public class LayerAllocation {
         LLogger.info("One Device: Static bytes " + String.format("%,d", staticBytes));
         LLogger.info("One Device: Layer bytes " + String.format("%,d", config.n_layers * bytesPerLayer));
 
-        if (!target.CUDA()) {
+        if (!target.CUDA() || gpuMem == null) {
             this.deviceCount = 0;
             this.firstCPULayer = 0;
             this.lastCPULayer = config.n_layers;
