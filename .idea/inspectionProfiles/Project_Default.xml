@@ -5,5 +5,8 @@
       <option name="m_ignoreImmediatelyReturnedVariables" value="false" />
       <option name="m_ignoreAnnotatedVariables" value="false" />
     </inspection_tool>
+    <inspection_tool class="UseCompareMethod" enabled="true" level="WARNING" enabled_by_default="true">
+      <option name="suggestFloatingCompare" value="false" />
+    </inspection_tool>
   </profile>
 </component>
