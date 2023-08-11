@@ -1,8 +1,34 @@
+---------------- llama2.c ----------------
+#make runomp
+
+--checkpoint stories15M.bin
+achieved tok/s: 1123.22
+
+./run stories42M.bin
+achieved tok/s: 736.8
+
+MP_NUM_THREADS=8 ./run llama2_7b.bin -t 1.0 -n 256 -i "One day, Lily met a Shoggoth"
+achieved tok/s: 11.2
+
+---------------- llama2j ----------------
+
 ./run stories15M.bin
-achieved tok/s: 35.6
+achieved tok/s: 35.1 (3.1%)
 
+./run stories42M.bin
+achieved tok/s: 25.9 (3.5%)
 
+THREAD_COUNT = 8;
+--checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
+achieved tok/s: 1.2 (10.7%)
 
+THREAD_COUNT = 16;
+--checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
+achieved tok/s: 2.0 (17.9%)
+
+THREAD_COUNT = 32;
+--checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
+achieved tok/s: 2.3 (20.5%)
 
 ----------------
 
