@@ -1,0 +1,19 @@
+Last updated to llama2.c version
+8/11/2023 by Tero Heinonen
+
+commit c42641205ffe17871af3464f35f51b201e58ebeb
+Author: Andrej Karpathy <andrej.karpathy@gmail.com>
+Date:   Thu Aug 10 15:23:05 2023 +0000
+
+    turn off topp sampling by default because it is a bit too slow to be the default. it is likely that turning it on, e.g. -p 0.9 is midlly higher quality and safer samples, but this comes at a cost of too much performance in double digit percent sometimes, for it to be on by default i think...
+
+---------------------------------------------------------------------------------------------------
+
+commit ce05cc28cf1e3560b873bb21837638a434520a67 (HEAD -> master, origin/master, origin/HEAD)
+Merge: f61807d ab39930
+Author: Andrej <andrej.karpathy@gmail.com>
+Date:   Sun Jul 30 18:15:24 2023 -0700
+
+    Merge pull request #178 from cgbur/patch-1
+
+    Add Zig port of project
