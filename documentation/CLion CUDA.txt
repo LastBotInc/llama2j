@@ -1,0 +1,2 @@
+Settings -> Build, Execution, Deployment -> CMake -> CMake options
+-DCMAKE_CUDA_ARCHITECTURES=89 -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc
