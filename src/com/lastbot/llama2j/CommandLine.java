@@ -8,12 +8,16 @@ import java.util.Map;
 public class CommandLine {
     private static final String CHECKPOINT = "--checkpoint";
     private static final String TEMP = "--temp";
+    private static final String TOPP = "--topp";
+    private static final String SEED = "--seed";
     private static final String STEPS = "--steps";
     private static final String GPU = "--gpuMem";
     private static final String PROMPT = "--prompt";
 
     private String checkpoint;
     private float temperature = 0.9f; // e.g. 1.0, or 0.0
+    private Float topp = null; // e.g. 1.0, or 0.0
+    private Long seed = null; // e.g. 12345
     private int steps = 256;          // max number of steps to run for, 0: use seq_len
     private String prompt = "One day, Lily met a Shoggoth";      // prompt string
 
@@ -41,6 +45,20 @@ public class CommandLine {
                 LLogger.info(TEMP + " " + temperature);
             } else {
                 LLogger.info(TEMP + " " + temperature + " (using default)");
+            }
+
+            if (arguments.containsKey(TOPP)) {
+                topp = Float.parseFloat(arguments.get(TOPP));
+                LLogger.info(TOPP + " " + topp);
+            } else {
+                LLogger.info(TOPP + " " + topp + " (using default, sample from predicted distribution)");
+            }
+
+            if (arguments.containsKey(SEED)) {
+                seed = Long.parseLong(arguments.get(SEED));
+                LLogger.info(SEED + " " + seed);
+            } else {
+                LLogger.info(SEED + " " + seed + " (using default, use current time)");
             }
 
             if (arguments.containsKey(STEPS)) {
@@ -92,6 +110,14 @@ public class CommandLine {
         return temperature;
     }
 
+    public Float getTopp() {
+        return topp;
+    }
+
+    public Long getSeed() {
+        return seed;
+    }
+
     public int getSteps() {
         return steps;
     }
@@ -108,6 +134,8 @@ public class CommandLine {
         System.out.println("Usage: <COMMAND> \n " +
                 CHECKPOINT + " <checkpoint_file> e.g. llama2_7b.bin\n" +
                 TEMP + " <temperature> e.g. 0.9\n" +
+                TOPP + " <topp> e.g. 0.9 (top-p in nucleus sampling)\n" +
+                SEED + " <seed> e.g. 12345 random seed, default is current time\n" +
                 STEPS + " <steps> e.g. 256\n" +
                 GPU + " <gpu memory allocation per device> e.g. 17,24,24,24\n" +
                 PROMPT + " <prompt> e.g. \"One day, Lily met a Shoggoth\"\n");
