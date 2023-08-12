@@ -1,0 +1,2 @@
+sudo apt install tuned
+sudo apt-get install linux-tools-6.2.0-26-generic linux-cloud-tools-6.2.0-26-generic
