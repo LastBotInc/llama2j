@@ -2,13 +2,16 @@ package com.lastbot.llama2j;
 
 import jcuda.Pointer;
 import jcuda.Sizeof;
+import jcuda.driver.*;
 import jcuda.runtime.JCuda;
 import jcuda.runtime.cudaStream_t;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
+import static jcuda.driver.JCudaDriver.*;
 import static jcuda.runtime.JCuda.*;
 import static jcuda.runtime.cudaError.cudaSuccess;
 import static jcuda.runtime.cudaMemcpyKind.*;
@@ -249,5 +252,121 @@ public class ContextCUDA implements Closeable {
         // Destroy the CUDA streams
         cudaStreamDestroy(transferStream);
         cudaStreamDestroy(kernelStream);
+    }
+
+    public class JCudaVectorAddition {
+        public static void main(String args[]) {
+            // Initialize the driver and create a context for the first device.
+            cuInit(0);
+            CUdevice device = new CUdevice();
+            cuDeviceGet(device, 0);
+            CUcontext context = new CUcontext();
+            cuCtxCreate(context, 0, device);
+
+            // Load the ptx file.
+            CUmodule module = new CUmodule();
+            String ptxFileName = preparePtxFile("vectorAddition.cu");
+            cuModuleLoad(module, ptxFileName);
+
+            // Obtain a function pointer to the kernel function.
+            CUfunction function = new CUfunction();
+            cuModuleGetFunction(function, module, "add");
+
+            // Allocate and set the device input data.
+            int n = 50000;
+            float hostInputA[] = new float[n];
+            float hostInputB[] = new float[n];
+            for (int i = 0; i < n; i++) {
+                hostInputA[i] = (float) i;
+                hostInputB[i] = (float) i;
+            }
+            CUdeviceptr deviceInputA = new CUdeviceptr();
+            cuMemAlloc(deviceInputA, n * Sizeof.FLOAT);
+            cuMemcpyHtoD(deviceInputA, Pointer.to(hostInputA), n * Sizeof.FLOAT);
+
+            CUdeviceptr deviceInputB = new CUdeviceptr();
+            cuMemAlloc(deviceInputB, n * Sizeof.FLOAT);
+            cuMemcpyHtoD(deviceInputB, Pointer.to(hostInputB), n * Sizeof.FLOAT);
+
+            // Allocate device output memory.
+            CUdeviceptr deviceOutput = new CUdeviceptr();
+            cuMemAlloc(deviceOutput, n * Sizeof.FLOAT);
+
+            // Create and set up the kernel parameters.
+            Pointer kernelParameters = Pointer.to(
+                    Pointer.to(new int[]{n}),
+                    Pointer.to(deviceInputA),
+                    Pointer.to(deviceInputB),
+                    Pointer.to(deviceOutput)
+            );
+
+            // Set up the kernel launch parameters.
+            int blockSizeX = 256;
+            int gridSizeX = (int) Math.ceil((double) n / blockSizeX);
+            CUstream stream = new CUstream();
+            cuStreamCreate(stream, 0);
+
+            // Launch the kernel function.
+            cuLaunchKernel(function,
+                    gridSizeX, 1, 1,      // Grid dimension
+                    blockSizeX, 1, 1,      // Block dimension
+                    0, stream,             // Shared memory size and stream
+                    kernelParameters, null // Kernel- and extra parameters
+            );
+
+            // Copy the device output to the host.
+            float hostOutput[] = new float[n];
+            cuMemcpyDtoH(Pointer.to(hostOutput), deviceOutput, n * Sizeof.FLOAT);
+
+            // Cleanup.
+            cuMemFree(deviceInputA);
+            cuMemFree(deviceInputB);
+            cuMemFree(deviceOutput);
+            cuCtxDestroy(context);
+
+            // Print out the result.
+            for (int i = 0; i < n; i++) {
+                System.out.println(hostOutput[i]);
+            }
+        }
+
+        private static String preparePtxFile(String cuFileName) {
+            int endIndex = cuFileName.lastIndexOf('.');
+            if (endIndex == -1) endIndex = cuFileName.length() - 1;
+            String ptxFileName = cuFileName.substring(0, endIndex + 1) + "ptx";
+
+            String modelString = "-m" + System.getProperty("sun.arch.data.model");
+            String cmd = "nvcc " + modelString + " -ptx " + cuFileName + " -o " + ptxFileName;
+
+            System.out.println("Executing:\n" + cmd);
+            try {
+                Process process = Runtime.getRuntime().exec(cmd);
+//                String errorMessage =
+//                        new String(JCudaDriver.toByteArray(process.getErrorStream()));
+//                String outputMessage =
+//                        new String(JCudaDriver.toByteArray(process.getInputStream()));
+                int exitValue = 0;
+                try {
+                    exitValue = process.waitFor();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(
+                            "Interrupted while waiting for nvcc output", e);
+                }
+
+                if (exitValue != 0) {
+                    System.out.println("nvcc process exitValue " + exitValue);
+//                    System.out.println("errorMessage:\n"+errorMessage);
+//                    System.out.println("outputMessage:\n"+outputMessage);
+//                    throw new IOException(
+//                            "Could not create .ptx file: "+errorMessage);
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(
+                        "Could not create .ptx file", e);
+            }
+
+            return ptxFileName;
+        }
     }
 }
