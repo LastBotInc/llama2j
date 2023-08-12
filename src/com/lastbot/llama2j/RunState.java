@@ -135,13 +135,6 @@ public class RunState implements Closeable {
 
     @Override
     public void close() {
-        if (c.cpu != null) {
-            c.cpu.close();
-        }
-        if (c.cudas != null) {
-            for (int i = 0; i < c.cudas.length; i++) {
-                c.cudas[i].close();
-            }
-        }
+        // rely on context.close
     }
 }
