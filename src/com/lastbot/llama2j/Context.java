@@ -1,6 +1,8 @@
 package com.lastbot.llama2j;
 
-public class Context {
+import java.io.Closeable;
+
+public class Context implements Closeable {
     final LayerAllocation layerAllocation;
     final ContextCUDA[] cudas;
     final ContextCPU cpu;
@@ -10,7 +12,19 @@ public class Context {
         this.cudas = new ContextCUDA[layerAllocation.deviceCount];
         this.layerAllocation = layerAllocation;
         for (int dev = 0; dev < layerAllocation.deviceCount; dev++) {
-            this.cudas[dev] = new ContextCUDA("contextCUDA0", dev);
+            this.cudas[dev] = new ContextCUDA("contextCUDA" + dev, dev);
+        }
+    }
+
+    @Override
+    public void close() {
+        if (cpu != null) {
+            cpu.close();
+        }
+        if (cudas != null) {
+            for (int i = 0; i < cudas.length; i++) {
+                cudas[i].close();
+            }
         }
     }
 }
