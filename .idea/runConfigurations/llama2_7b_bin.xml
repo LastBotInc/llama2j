@@ -3,7 +3,7 @@
     <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
     <module name="llama2j" />
     <option name="PROGRAM_PARAMETERS" value="--checkpoint llama2_7b.bin --gpuMem &quot;17,24,24,24&quot;" />
-    <option name="VM_PARAMETERS" value="-Xmx128g -Xms128g --add-modules jdk.incubator.vector" />
+    <option name="VM_PARAMETERS" value="-Xmx127g -Xms127g -XX:+UseZGC -XX:+UseUnalignedLoadStores -XX:+UseXMMForArrayCopy -XX:+UseXMMForObjInit -XX:+UseFPUForSpilling -XX:-UseFastStosb" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>
