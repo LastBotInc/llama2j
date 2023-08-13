@@ -5,11 +5,10 @@ Inference for Llama-2 Transformer model in pure Java.
 
 Adapted from: :https://github.com/karpathy/llama2.c
 
-Commit: ce05cc2
-
 */
 
 import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
+import jcuda.Pointer;
 
 import java.io.File;
 import java.io.IOException;
@@ -23,6 +22,14 @@ public class Run {
     private static final boolean USE_CUDA = true;
 
     private static final int THREAD_COUNT = 32;
+
+    private static final String CUDA_SOURCE_FILE_PATH = "src/cuda";
+
+    private static final BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(THREAD_COUNT, false);
+
+    private static final RejectedExecutionHandler handler = new ThreadPoolExecutor.CallerRunsPolicy();
+    private static final ExecutorService executor =
+            new ThreadPoolExecutor(THREAD_COUNT, THREAD_COUNT, 5L, TimeUnit.MINUTES, queue, handler);
 
     private static final String MODELS_DIRECTORY = "models";
     private static final String TOKENIZER_FILE = "tokenizer.bin";
@@ -64,6 +71,10 @@ public class Run {
         }
     }
 
+    private static void accumCU(Pointer a, Pointer b, int size) {
+
+    }
+
     private static void rmsnorm(float[] o, float[] x, float[] weight, int weightIndex, int size) {
         // calculate sum of squares
         float ss = 0.0f;
@@ -100,17 +111,7 @@ public class Run {
         }
     }
 
-    private static BlockingQueue<Runnable> queue;
-    private static RejectedExecutionHandler handler;
-    private static ExecutorService executor;
-
     private static void matmulParallel(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
-        if (executor == null) {
-            queue = new ArrayBlockingQueue<>(THREAD_COUNT, false);
-            handler = new ThreadPoolExecutor.CallerRunsPolicy();
-            executor = new ThreadPoolExecutor(THREAD_COUNT, THREAD_COUNT, 60L, TimeUnit.SECONDS, queue, handler);
-        }
-
         int sizePerThread = d / THREAD_COUNT;
         CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
         for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
@@ -468,6 +469,29 @@ public class Run {
         return state.probIndex[last_idx].index; // in case of rounding errors
     }
 
+    private static Kernel[] accumKernels;
+
+    private static void initKernels(Context context) {
+        if (context.cudas == null || context.cudas.length == 0) {
+            return;
+        }
+        accumKernels = initKernel(context, "accum.cu", "accum");
+    }
+
+    private static Kernel[] initKernel(Context context, String cuFileName, String functionName) {
+        Kernel[] kernels = new Kernel[context.cudas.length];
+
+        String cuFilePath = CUDA_SOURCE_FILE_PATH + File.separator + cuFileName;
+
+        String cubinFileName = Kernel.prepareCubinFile(cuFilePath);
+        for (int i = 0; i < context.cudas.length; i++) {
+            ContextCUDA cuda = context.cudas[i];
+            Kernel kernel = new Kernel(cuda, cubinFileName, functionName);
+            kernels[i] = kernel;
+        }
+        return kernels;
+    }
+
     public static void main(String[] args) {
 
         CommandLine commandLine = new CommandLine(args);
@@ -516,8 +540,11 @@ public class Run {
             System.exit(1);
         }
 
-        RunState state = new RunState(context, config);
+        if (target.CUDA()) {
+            initKernels(context);
+        }
 
+        RunState state = new RunState(context, config);
 
         long endModelRead = time();
 
@@ -617,11 +644,17 @@ public class Run {
         }
         Output.emit("\n"); // explicit print the initial BOS token for stylistic symmetry reasons
 
-        // report achieved tok/s
         long end = time();
+
+        // cleanup, free memory
+
+        executor.shutdown();
 
         state.close();
 
+        context.close();
+
+        // report achieved tok/s
         if (pos > 1) {
             LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (pos - 1) / (double) (end - start) * 1000));
         }
