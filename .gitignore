@@ -33,4 +33,4 @@ models
 .attach_pid*
 
 src/cuda/cmake-build-debug
-
+src/cuda/*.cubin
