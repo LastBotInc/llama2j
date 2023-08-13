@@ -2,7 +2,7 @@
   <configuration default="false" name="stories42M" type="Application" factoryName="Application">
     <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
     <module name="llama2j" />
-    <option name="PROGRAM_PARAMETERS" value="--checkpoint stories42M.bin" />
+    <option name="PROGRAM_PARAMETERS" value="--checkpoint stories42M.bin --gpuMem &quot;17,24,24,24&quot;" />
     <option name="VM_PARAMETERS" value="-Xmx63g -Xms63g -XX:+UseZGC -XX:+UseUnalignedLoadStores -XX:+UseXMMForArrayCopy -XX:+UseXMMForObjInit -XX:+UseFPUForSpilling -XX:-UseFastStosb" />
     <method v="2">
       <option name="Make" enabled="true" />
