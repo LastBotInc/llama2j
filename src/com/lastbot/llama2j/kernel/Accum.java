@@ -30,7 +30,7 @@ public class Accum extends Kernel {
         Pointer pa = cuda.allocateAndCopyToDevice(a, false);
         Pointer pb = cuda.allocateAndCopyToDevice(b, false);
         cuda.synchronizeTransfer();
-        call(pa, pb, size, 0);
+        call(0, pa, pb, size);
         cuda.synchronizeKernel(0);
         cuda.copyFromDeviceToHost(pa, a);
         cuda.free(pa);
@@ -41,7 +41,7 @@ public class Accum extends Kernel {
         compareWithThreshold("Accum.call", a, copyOfA, 1e-5f);
     }
 
-    public void call(Pointer a, Pointer b, int n, int kernelStreamId) {
+    public void call(int kernelStreamId, Pointer a, Pointer b, int n) {
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(a),
                 Pointer.to(b),
