@@ -8,7 +8,7 @@ public class LayerMemoryUtil {
         int floatOffset = layerFloatOffset(cpuArray, firstLayer, nLayers);
         int floatSize = layerFloatSize(cpuArray, firstLayer, lastLayer, nLayers);
 
-        Pointer pointer = cu.allocateAndCopyToDeviceWithOffset(cpuArray, floatOffset, floatSize);
+        Pointer pointer = cu.allocateAndCopyToDeviceWithOffset(cpuArray, floatOffset, floatSize, true);
         return pointer;
     }
 

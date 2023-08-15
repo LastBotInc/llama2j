@@ -108,22 +108,22 @@ public class RunState implements Closeable {
                 int firstLayer = context.layerAllocation.firstLayer[dev];
                 int lastLayer = context.layerAllocation.lastLayer[dev];
 
-                xCU = cu.allocateFloatArray(config.dim);
-                xbCU = cu.allocateFloatArray(config.dim);
-                xb2CU = cu.allocateFloatArray(config.dim);
-                hbCU = cu.allocateFloatArray(config.hidden_dim);
-                hb2CU = cu.allocateFloatArray(config.hidden_dim);
-                qCU = cu.allocateFloatArray(config.dim);
-                kCU = cu.allocateFloatArray(config.dim);
-                vCU = cu.allocateFloatArray(config.dim);
-                attCU = cu.allocateFloatArray((long) config.n_heads * config.seq_len);
-                logitsCU = cu.allocateFloatArray(config.vocab_size);
+                xCU = cu.allocateFloatArray(config.dim, true);
+                xbCU = cu.allocateFloatArray(config.dim, true);
+                xb2CU = cu.allocateFloatArray(config.dim, true);
+                hbCU = cu.allocateFloatArray(config.hidden_dim, true);
+                hb2CU = cu.allocateFloatArray(config.hidden_dim, true);
+                qCU = cu.allocateFloatArray(config.dim, true);
+                kCU = cu.allocateFloatArray(config.dim, true);
+                vCU = cu.allocateFloatArray(config.dim, true);
+                attCU = cu.allocateFloatArray((long) config.n_heads * config.seq_len, true);
+                logitsCU = cu.allocateFloatArray(config.vocab_size, true);
 
                 int nLayers = lastLayer - firstLayer + 1;
                 int lengthOfLayerData = nLayers * (config.seq_len * config.dim);
 
-                l_key_cacheCU = cu.allocateFloatArray(lengthOfLayerData);
-                l_value_cacheCU = cu.allocateFloatArray(lengthOfLayerData);
+                l_key_cacheCU = cu.allocateFloatArray(lengthOfLayerData, true);
+                l_value_cacheCU = cu.allocateFloatArray(lengthOfLayerData, true);
 
 //                l_key_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
 //                l_value_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);

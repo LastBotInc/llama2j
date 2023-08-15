@@ -99,7 +99,7 @@ public class TransformerWeights {
             long t2 = System.currentTimeMillis();
             for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = context.cudas[dev];
-                token_embedding_tableCU = cu.allocateAndCopyToDevice(token_embedding_table);
+                token_embedding_tableCU = cu.allocateAndCopyToDevice(token_embedding_table, true);
                 int firstLayer = context.layerAllocation.firstLayer[dev];
                 int lastLayer = context.layerAllocation.lastLayer[dev];
 
@@ -121,10 +121,10 @@ public class TransformerWeights {
 //                l_w1CU = cu.allocateAndCopyToDevice(l_w1);
 //                l_w2CU = cu.allocateAndCopyToDevice(l_w2);
 //                l_w3CU = cu.allocateAndCopyToDevice(l_w3);
-                rms_final_weightCU = cu.allocateAndCopyToDevice(rms_final_weight);
-                freq_cis_realCU = cu.allocateAndCopyToDevice(freq_cis_real);
-                freq_cis_imagCU = cu.allocateAndCopyToDevice(freq_cis_imag);
-                wclsCU = sharedWeights ? token_embedding_tableCU : cu.allocateAndCopyToDevice(wcls);
+                rms_final_weightCU = cu.allocateAndCopyToDevice(rms_final_weight, true);
+                freq_cis_realCU = cu.allocateAndCopyToDevice(freq_cis_real, true);
+                freq_cis_imagCU = cu.allocateAndCopyToDevice(freq_cis_imag, true);
+                wclsCU = sharedWeights ? token_embedding_tableCU : cu.allocateAndCopyToDevice(wcls, true);
             }
             long t3 = System.currentTimeMillis();
             LLogger.time("Create TransformerWeights CUDA", t2, t3);
