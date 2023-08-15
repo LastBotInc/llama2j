@@ -5,7 +5,7 @@
     <option name="VM_PARAMETERS" value="-Xmx128g -Xms128g -XX:+UseUnalignedLoadStores -XX:+UseXMMForArrayCopy -XX:+UseXMMForObjInit -XX:+UseFPUForSpilling -XX:-UseFastStosb -XX:+HeapDumpOnOutOfMemoryError" />
     <extension name="coverage">
       <pattern>
-        <option name="PATTERN" value="com.lastbot.llama2j.*" />
+        <option name="PATTERN" value="com.lastbot.llama2j.kernel.*" />
         <option name="ENABLED" value="true" />
       </pattern>
     </extension>
