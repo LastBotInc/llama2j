@@ -17,6 +17,10 @@ public class Context implements Closeable {
         }
     }
 
+    public ContextCUDA lastCuda() {
+        return cudas[cudas.length - 1];
+    }
+
     @Override
     public void close() {
         if (cpu != null) {
