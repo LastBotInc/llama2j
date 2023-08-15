@@ -14,13 +14,13 @@ public class ExpAndSum extends Kernel {
     private static final int LARGE_KERNEL = 1024 * 1024;
 
     private final CUfunction smallKernel;
-    private final CUfunction largeSumKernel;
+    private final CUfunction largeLocalSumKernel;
     private final CUfunction largeReductionKernel;
 
     public ExpAndSum(ContextCUDA cuda) {
         super(cuda, "expAndSum");
         smallKernel = createSmall();
-        largeSumKernel = createLargeSum();
+        largeLocalSumKernel = createLargeLocalSum();
         largeReductionKernel = createLargeReduction();
     }
 
@@ -85,23 +85,23 @@ public class ExpAndSum extends Kernel {
             );
         } else if (size <= LARGE_KERNEL) {
             int numberOfThreads = 1024;
-            int numberOfBlocks = (int) Math.ceil((double) size / numberOfThreads);
-            Pointer partialSum = cuda.allocate((long) numberOfBlocks * Float.BYTES);
+            int numBlocks = (int) Math.ceil((double) size / numberOfThreads);
+            Pointer blockSum = cuda.allocate((long) numBlocks * Float.BYTES);
             // exp and sum
             {
                 int sharedMemory = numberOfThreads * Float.BYTES;
                 int blockSizeX = 1024;
-                int gridSizeX = numberOfBlocks;
+                int gridSizeX = numBlocks;
 
-//            __global__ void expAndSum(float* partialSum, float* x, float* maxValue, int index, int size) {
+//            __global__ void expAndSum(float* blockSum, float* x, float* maxValue, int index, int size) {
                 Pointer kernelParameters = Pointer.to(
-                        Pointer.to(partialSum),
+                        Pointer.to(blockSum),
                         Pointer.to(x),
                         Pointer.to(maxValue),
                         Pointer.to(new int[]{index}),
                         Pointer.to(new int[]{size})
                 );
-                cuLaunchKernel(largeSumKernel,
+                cuLaunchKernel(largeLocalSumKernel,
                         gridSizeX, 1, 1,          // Grid dimension
                         blockSizeX, 1, 1,      // Block dimension
                         sharedMemory, stream,  // Shared memory size and stream
@@ -111,15 +111,15 @@ public class ExpAndSum extends Kernel {
 //            cuda.synchronizeKernel(kernelStreamId);
             // reduction
             {
-                int blockSizeX = findNextPowerOf2(numberOfBlocks);
+                int blockSizeX = findNextPowerOf2(numBlocks);
                 int gridSizeX = 1;
                 int sharedMemory = blockSizeX * Float.BYTES;
 
-//                __global__ void sumReduction(float* sum, float* partialSum, int numberOfBlocks) {
+//                __global__ void sumReduction(float* sum, float* blockSum, int numBlocks) {
                 Pointer kernelParameters = Pointer.to(
                         Pointer.to(sum),
-                        Pointer.to(partialSum),
-                        Pointer.to(new int[]{numberOfBlocks})
+                        Pointer.to(blockSum),
+                        Pointer.to(new int[]{numBlocks})
                 );
                 cuLaunchKernel(largeReductionKernel,
                         gridSizeX, 1, 1,          // Grid dimension
@@ -128,7 +128,7 @@ public class ExpAndSum extends Kernel {
                         kernelParameters, null // Kernel- and extra parameters
                 );
             }
-            cuda.free(partialSum);
+            cuda.free(blockSum);
         } else {
             throw new RuntimeException("ExpAndSum.call with too large size" + size);
         }
@@ -171,12 +171,12 @@ public class ExpAndSum extends Kernel {
         return loadFromCode(code, "expAndSum");
     }
 
-    private CUfunction createLargeSum() {
+    private CUfunction createLargeLocalSum() {
         String code =
                 """
                             extern "C"
                             // First kernel: Calculate the exponential values and perform block-wise reduction.
-                            __global__ void expAndSum(float* partialSum, float* x, float* maxValue, int index, int size) {
+                            __global__ void localExpAndSum(float* blockSum, float* x, float* maxValue, int index, int size) {
                                 int tid = blockIdx.x * blockDim.x + threadIdx.x;
                                     
                                 // Shared memory for block-wise summation
@@ -203,11 +203,11 @@ public class ExpAndSum extends Kernel {
                                     
                                 // First thread of each block writes its result to the global array
                                 if (threadIdx.x == 0) {
-                                    partialSum[blockIdx.x] = sdata[0];
+                                    blockSum[blockIdx.x] = sdata[0];
                                 }
                             }
                         """;
-        return loadFromCode(code, "expAndSum");
+        return loadFromCode(code, "localExpAndSum");
     }
 
     private CUfunction createLargeReduction() {
@@ -215,12 +215,12 @@ public class ExpAndSum extends Kernel {
                 """
                             extern "C"
                             // Second kernel: Sums up the partial sums
-                            __global__ void sumReduction(float* sum, float* partialSum, int numberOfBlocks) {
+                            __global__ void sumReduction(float* sum, float* blockSum, int numBlocks) {
                                 extern __shared__ float sdata[];
                             
                                 int tid = threadIdx.x;
-                                if (tid < numberOfBlocks) {
-                                    sdata[tid] = partialSum[tid];
+                                if (tid < numBlocks) {
+                                    sdata[tid] = blockSum[tid];
                                 } else {
                                     sdata[tid] = 0.0f;
                                 }
