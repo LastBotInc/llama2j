@@ -20,7 +20,7 @@ public class WeightNormalizeAndScale extends Kernel {
         this.kernel = create();
     }
 
-    private static void call(float[] out, float[] x, float[] weight, int weightIndex,
+    public static void call(float[] out, float[] x, float[] weight, int weightIndex,
                              float[] sumOfSquares, int size) {
         float ss = sumOfSquares[0];
         for (int j = 0; j < size; j++) {
