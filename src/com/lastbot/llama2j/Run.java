@@ -8,7 +8,7 @@ Adapted from: :https://github.com/karpathy/llama2.c
 */
 
 import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
-import jcuda.Pointer;
+import jcuda.Sizeof;
 
 import java.io.File;
 import java.io.IOException;
@@ -16,14 +16,14 @@ import java.util.Arrays;
 import java.util.concurrent.*;
 
 import static java.lang.Math.abs;
+import static jcuda.runtime.JCuda.cudaMemcpy;
+import static jcuda.runtime.cudaMemcpyKind.cudaMemcpyDeviceToDevice;
 
 public class Run {
     private static final boolean USE_CPU = true;
     private static final boolean USE_CUDA = true;
 
     private static final int THREAD_COUNT = 32;
-
-    private static final String CUDA_SOURCE_FILE_PATH = "src/cuda";
 
     private static final BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(THREAD_COUNT, false);
 
@@ -63,19 +63,11 @@ public class Run {
     }
 
 // ----------------------------------------------------------------------------
-// neural net blocks
+// kernelizable functions for transformer
 
-    private static void accum(float[] a, float[] b, int size) {
-        for (int i = 0; i < size; i++) {
-            a[i] += b[i];
-        }
-    }
+    // rmsnorm
 
-    private static void accumCU(Pointer a, Pointer b, int size) {
-
-    }
-
-    private static void rmsnorm(float[] o, float[] x, float[] weight, int weightIndex, int size) {
+    private static void sumOfSquares(float[] out, float[] x, int size) {
         // calculate sum of squares
         float ss = 0.0f;
         for (int j = 0; j < size; j++) {
@@ -84,32 +76,66 @@ public class Run {
         ss /= size;
         ss += 1e-5f;
         ss = 1.0f / (float) Math.sqrt(ss);
-        // normalize and scale
+        out[0] = ss;
+    }
+
+    private static void weightNormalizeAndScale(float[] out, float[] x, float[] weight, int weightIndex,
+                                                float[] sumOfSquares, int size) {
+        float ss = sumOfSquares[0];
         for (int j = 0; j < size; j++) {
-            o[j] = weight[weightIndex + j] * (ss * x[j]);
+            out[j] = weight[weightIndex + j] * (ss * x[j]);
         }
     }
 
-    private static void softmax(float[] x, int index, int size) {
-        // find max value (for numerical stability)
+//    private static void rmsnorm(float[] out, int outIndex, float[] x, float[] weight, int weightIndex, int size) {
+//        float[] ss = {0f};
+//        sumOfSquares(ss, x, size);
+//        normalizeAndScale(out, x, weight, weightIndex, ss, size);
+//    }
+
+    // softmax
+
+    private static void findMax(float[] out, float[] x, int index, int size) {
         float max_val = x[index]; // index + 0
         for (int i = 1; i < size; i++) {
             if (x[index + i] > max_val) {
                 max_val = x[index + i];
             }
         }
-        // exp and sum
-        float sum = 0.0f;
+        out[0] = max_val;
+    }
+
+    private static void expAndSum(float[] sum, float[] x, float[] maxValue, int index, int size) {
+        float s = 0.0f;
+        float max_val = maxValue[0];
+
         for (int i = 0; i < size; i++) {
             // zzz consider expm1
             x[index + i] = (float) Math.exp(x[index + i] - max_val);
-            sum += x[index + i];
+            s += x[index + i];
         }
-        // normalize
+        sum[0] = s;
+    }
+
+    private static void normalize(float[] sum, float[] x, int index, int size) {
+        float s = sum[0];
         for (int i = 0; i < size; i++) {
-            x[index + i] /= sum;
+            x[index + i] /= s;
         }
     }
+
+//    private static void softmax(float[] x, int index, int size) {
+//        // find max value (for numerical stability)
+//        float[] max = {0f};
+//        findMax(max, x, index, size);
+//
+//        // exp and sum
+//        float[] sum = {0f};
+//        expAndSum(sum, x, max, index, size);
+//
+//        // normalize
+//        normalize(sum, x, index, size);
+//    }
 
     private static void matmulParallel(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
         int sizePerThread = d / THREAD_COUNT;
@@ -160,26 +186,48 @@ public class Run {
         }
     }
 
-    private static void transformer(int token, int pos, Config p, RunState s, TransformerWeights w) {
+    private static void transformer(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
+        boolean cpu = context.cpu != null;
+        boolean cuda = context.cudas != null && context.cudas.length > 0;
+        if (cpu) {
+            transformerCPU(token, pos, p, s, w, context);
+        }
+//        if (cuda) {
+//            transformerCUDA(token, pos, p, s, w, context);
+//        }
+    }
+
+    private static void transformerCPU(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
         // a few convenience variables
-        float[] x = s.x;
         int dim = p.dim;
         int hidden_dim = p.hidden_dim;
         int head_size = dim / p.n_heads;
 
+        int cudaIndex = 0;
+        ContextCUDA cuda = context.cudas[cudaIndex];
+
         // copy the token embedding into x
-//        float*content_row = &(w.token_embedding_table[token * dim]);
-//        memcpy(x, content_row, dim * sizeof( * x));
-        System.arraycopy(w.token_embedding_table, token * dim, x, 0, dim);
+        System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
 
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         int freq_cis_imag_row = pos * head_size / 2;
 
+        float[] ss = {0f};
+
         // forward all the layers
         for (int layer = 0; layer < p.n_layers; layer++) {
+            // hand over to the next device
+            if (layer > context.layerAllocation.lastLayer[cudaIndex]) {
+                cudaIndex++;
+                ContextCUDA newCuda = context.cudas[cudaIndex];
+                // zzz copy state from cuda to newCuda
+                cuda = newCuda;
+            }
 
             // attention rmsnorm
-            rmsnorm(s.xb, x, w.l_rms_att_weight, layer * dim, dim);
+//            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
+            sumOfSquares(ss, s.x, dim);
+            weightNormalizeAndScale(s.xb, s.x, w.l_rms_att_weight, layer * dim, ss, dim);
 
             // qkv matmuls for this position
             matmul(s.q, s.xb, w.l_wq, layer * dim * dim, dim, dim);
@@ -238,7 +286,18 @@ public class Run {
                 }
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
-                softmax(s.att, attentionIndex, pos + 1);
+//                softmax(s.att, attentionIndex, pos + 1);
+
+                // find max value (for numerical stability)
+                float[] max = {0f};
+                findMax(max, s.att, attentionIndex, pos + 1);
+
+                // exp and sum
+                float[] sum = {0f};
+                expAndSum(sum, s.att, max, attentionIndex, pos + 1);
+
+                // normalize
+                normalize(sum, s.att, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
@@ -264,10 +323,14 @@ public class Run {
             matmul(s.xb2, s.xb, w.l_wo, layer * dim * dim, dim, dim);
 
             // residual connection back into x
-            accum(x, s.xb2, dim);
+            cuda.accum.test(s.x, s.xb2, dim);
 
             // ffn rmsnorm
-            rmsnorm(s.xb, x, w.l_rms_ffn_weight, layer * dim, dim);
+//            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
+
+            ss[0] = 0f;
+            sumOfSquares(ss, s.x, dim);
+            weightNormalizeAndScale(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, ss, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
@@ -288,14 +351,33 @@ public class Run {
             matmul(s.xb, s.hb, w.l_w2, layer * dim * hidden_dim, hidden_dim, dim);
 
             // residual connection
-            accum(x, s.xb, dim);
+            cuda.accum.test(s.x, s.xb, dim);
         } // layers
 
         // final rmsnorm
-        rmsnorm(x, x, w.rms_final_weight, 0, dim);
+//        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
+        ss[0] = 0f;
+        sumOfSquares(ss, s.x, dim);
+        weightNormalizeAndScale(s.x, s.x, w.rms_final_weight, 0, ss, dim);
 
         // classifier into logits
-        matmul(s.logits, x, w.wcls, 0, p.dim, p.vocab_size);
+        matmul(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+    }
+
+    private static void transformerCUDA(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
+        // a few convenience variables
+        int dim = p.dim;
+        int hidden_dim = p.hidden_dim;
+        int head_size = dim / p.n_heads;
+
+        // copy the token embedding into x
+//        float*content_row = &(w.token_embedding_table[token * dim]);
+//        memcpy(x, content_row, dim * sizeof( * x));
+//        System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
+        cudaMemcpy(s.xCU, w.token_embedding_tableCU.withByteOffset((long) token * dim * Sizeof.FLOAT),
+                dim, cudaMemcpyDeviceToDevice);
+
+
     }
 
 // ----------------------------------------------------------------------------
@@ -469,29 +551,6 @@ public class Run {
         return state.probIndex[last_idx].index; // in case of rounding errors
     }
 
-    private static Kernel[] accumKernels;
-
-    private static void initKernels(Context context) {
-        if (context.cudas == null || context.cudas.length == 0) {
-            return;
-        }
-        accumKernels = initKernel(context, "accum.cu", "accum");
-    }
-
-    private static Kernel[] initKernel(Context context, String cuFileName, String functionName) {
-        Kernel[] kernels = new Kernel[context.cudas.length];
-
-        String cuFilePath = CUDA_SOURCE_FILE_PATH + File.separator + cuFileName;
-
-        String cubinFileName = Kernel.prepareCubinFile(cuFilePath);
-        for (int i = 0; i < context.cudas.length; i++) {
-            ContextCUDA cuda = context.cudas[i];
-            Kernel kernel = new Kernel(cuda, cubinFileName, functionName);
-            kernels[i] = kernel;
-        }
-        return kernels;
-    }
-
     public static void main(String[] args) {
 
         CommandLine commandLine = new CommandLine(args);
@@ -538,10 +597,6 @@ public class Run {
             weights = new TransformerWeights(context, reader, config, shared_weights);
         } catch (IOException e) {
             System.exit(1);
-        }
-
-        if (target.CUDA()) {
-            initKernels(context);
         }
 
         RunState state = new RunState(context, config);
@@ -596,9 +651,8 @@ public class Run {
         int pos = 0;     // position in the sequence
 
         while (pos < steps) {
-
             // forward the transformer to get logits for the next token
-            transformer(token, pos, config, state, weights);
+            transformer(token, pos, config, state, weights, context);
 
             // advance the state machine
             if (pos < num_prompt_tokens) {
@@ -615,7 +669,19 @@ public class Run {
                         state.logits[q] /= commandLine.getTemperature();
                     }
                     // apply softmax to the logits to get the probabilities for next token
-                    softmax(state.logits, 0, config.vocab_size);
+//                    softmax(state.logits, 0, config.vocab_size);
+
+                    // find max value (for numerical stability)
+                    float[] max = {0f};
+                    findMax(max, state.logits, 0, config.vocab_size);
+
+                    // exp and sum
+                    float[] sum = {0f};
+                    expAndSum(sum, state.logits, max, 0, config.vocab_size);
+
+                    // normalize
+                    normalize(sum, state.logits, 0, config.vocab_size);
+
                     if (commandLine.getTopp() == null) {
                         // we sample from this distribution to get the next token
                         next = sample(state, config.vocab_size);
