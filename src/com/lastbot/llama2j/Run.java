@@ -76,12 +76,12 @@ public class Run {
     // softmax
 
 
-    private static void normalize(float[] sum, float[] x, int index, int size) {
-        float s = sum[0];
-        for (int i = 0; i < size; i++) {
-            x[index + i] /= s;
-        }
-    }
+//    private static void normalize(float[] x, float[] divider, int index, int size) {
+//        float s = divider[0];
+//        for (int i = 0; i < size; i++) {
+//            x[index + i] /= s;
+//        }
+//    }
 
 //    private static void softmax(float[] x, int index, int size) {
 //        // find max value (for numerical stability)
@@ -256,7 +256,7 @@ public class Run {
                 cuda.expAndSum.test(sum, s.att, max, attentionIndex, pos + 1);
 
                 // normalize
-                normalize(sum, s.att, attentionIndex, pos + 1);
+                cuda.normalize.test(s.att, sum, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
@@ -639,7 +639,7 @@ public class Run {
                     context.lastCuda().expAndSum.test(sum, state.logits, max, 0, config.vocab_size);
 
                     // normalize
-                    normalize(sum, state.logits, 0, config.vocab_size);
+                    context.lastCuda().normalize.test(state.logits, sum,0, config.vocab_size);
 
                     if (commandLine.getTopp() == null) {
                         // we sample from this distribution to get the next token
