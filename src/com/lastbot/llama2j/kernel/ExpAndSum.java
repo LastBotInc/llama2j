@@ -84,14 +84,14 @@ public class ExpAndSum extends Kernel {
                     kernelParameters, null // Kernel- and extra parameters
             );
         } else if (size <= LARGE_KERNEL) {
-            int numberOfThreads = 1024;
-            int numBlocks = (int) Math.ceil((double) size / numberOfThreads);
-            Pointer blockSum = cuda.allocate((long) numBlocks * Float.BYTES);
+            int threadsPerBlock = 1024;
+            int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
+            Pointer blockSum = cuda.allocate((long) blocksPerGrid * Float.BYTES);
             // exp and sum
             {
-                int sharedMemory = numberOfThreads * Float.BYTES;
+                int sharedMemory = threadsPerBlock * Float.BYTES;
                 int blockSizeX = 1024;
-                int gridSizeX = numBlocks;
+                int gridSizeX = blocksPerGrid;
 
 //            __global__ void expAndSum(float* blockSum, float* x, float* maxValue, int index, int size) {
                 Pointer kernelParameters = Pointer.to(
@@ -111,15 +111,15 @@ public class ExpAndSum extends Kernel {
 //            cuda.synchronizeKernel(kernelStreamId);
             // reduction
             {
-                int blockSizeX = findNextPowerOf2(numBlocks);
+                int blockSizeX = findNextPowerOf2(blocksPerGrid);
                 int gridSizeX = 1;
                 int sharedMemory = blockSizeX * Float.BYTES;
 
-//                __global__ void sumReduction(float* sum, float* blockSum, int numBlocks) {
+//                __global__ void sumReduction(float* sum, float* blockSum, int blocksPerGrid) {
                 Pointer kernelParameters = Pointer.to(
                         Pointer.to(sum),
                         Pointer.to(blockSum),
-                        Pointer.to(new int[]{numBlocks})
+                        Pointer.to(new int[]{blocksPerGrid})
                 );
                 cuLaunchKernel(largeReductionKernel,
                         gridSizeX, 1, 1,          // Grid dimension
@@ -137,112 +137,110 @@ public class ExpAndSum extends Kernel {
     private CUfunction createSmall() {
         String code =
                 """
-                            extern "C"
-                            __global__ void expAndSum(float* sum, float* x, float* maxValue, int index, int size) {
-                                int tid = blockIdx.x * blockDim.x + threadIdx.x;
+                    extern "C"
+                    __global__ void expAndSum(float* sum, float* x, float* maxValue, int index, int size) {
+                        int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-                                extern __shared__ float sdata[];
+                        extern __shared__ float sdata[];
 
-                                if (tid < size) {
-                                    float max_val = maxValue[0];
+                        if (tid < size) {
+                            float max_val = maxValue[0];
 
-                                    x[index + tid] = expf(x[index + tid] - max_val);
-                                    
-//                                    printf("expf %.5f", x[index + tid]);
+                            x[index + tid] = expf(x[index + tid] - max_val);
+                            
+                            // Store the value in shared memory for reduction
+                            sdata[threadIdx.x] = x[index + tid];
+                        } else {
+                            sdata[threadIdx.x] = 0.0f;
+                        }
+                        __syncthreads();  // Ensure all threads in block have stored their values
 
-                                    // Store the value in shared memory for reduction
-                                    sdata[threadIdx.x] = x[index + tid];
-                                } else {
-                                    sdata[threadIdx.x] = 0.0f;
-                                }
-                                __syncthreads();  // Ensure all threads in block have stored their values
-
-                                // Block-wise reduction
-                                for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                    if (threadIdx.x < stride) {
-                                        sdata[threadIdx.x] += sdata[threadIdx.x + stride];
-                                    }
-                                    __syncthreads();  // Ensure all threads in block are in sync after each step
-                                }
-
-                                if (tid == 0) {
-                                    sum[0] = sdata[0];
-                                }
+                        // Block-wise reduction
+                        for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+                            if (threadIdx.x < stride) {
+                                sdata[threadIdx.x] += sdata[threadIdx.x + stride];
                             }
-                        """;
+                            __syncthreads();  // Ensure all threads in block are in sync after each step
+                        }
+
+                        if (tid == 0) {
+                            sum[0] = sdata[0];
+                        }
+                    }
+                """;
         return loadFromCode(code, "expAndSum");
     }
 
     private CUfunction createLargeLocalSum() {
         String code =
                 """
-                            extern "C"
-                            // First kernel: Calculate the exponential values and perform block-wise reduction.
-                            __global__ void localExpAndSum(float* blockSum, float* x, float* maxValue, int index, int size) {
-                                int tid = blockIdx.x * blockDim.x + threadIdx.x;
-                                    
-                                // Shared memory for block-wise summation
-                                extern __shared__ float sdata[];
-                                    
-                                // Ensure the thread is within bounds
-                                if (tid < size) {
-                                    float max_val = maxValue[0];
-                                    x[index + tid] = expf(x[index + tid] - max_val);
-                                    sdata[threadIdx.x] = x[index + tid];
-                                } else {
-                                    sdata[threadIdx.x] = 0.0f;
-                                }
-                                    
-                                __syncthreads();
-                                    
-                                // Block-wise reduction
-                                for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                    if (threadIdx.x < stride) {
-                                        sdata[threadIdx.x] += sdata[threadIdx.x + stride];
-                                    }
-                                    __syncthreads();
-                                }
-                                    
-                                // First thread of each block writes its result to the global array
-                                if (threadIdx.x == 0) {
-                                    blockSum[blockIdx.x] = sdata[0];
-                                }
+                    extern "C"
+                    // First kernel: Calculate the exponential values and perform block-wise reduction.
+                    __global__ void localExpAndSum(float* blockSum, float* x, float* maxValue, int index, int size) {
+                        int tid = blockIdx.x * blockDim.x + threadIdx.x;
+                            
+                        // Shared memory for block-wise summation
+                        extern __shared__ float sdata[];
+                            
+                        // Ensure the thread is within bounds
+                        if (tid < size) {
+                            float max_val = maxValue[0];
+                            x[index + tid] = expf(x[index + tid] - max_val);
+                            sdata[threadIdx.x] = x[index + tid];
+                        } else {
+                            sdata[threadIdx.x] = 0.0f;
+                        }
+                            
+                        __syncthreads();
+                            
+                        // Block-wise reduction
+                        for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+                            if (threadIdx.x < stride) {
+                                sdata[threadIdx.x] += sdata[threadIdx.x + stride];
                             }
-                        """;
+                            __syncthreads();
+                        }
+                            
+                        // First thread of each block writes its result to the global array
+                        if (threadIdx.x == 0) {
+                            blockSum[blockIdx.x] = sdata[0];
+                        }
+                    }
+                """;
         return loadFromCode(code, "localExpAndSum");
     }
 
     private CUfunction createLargeReduction() {
         String code =
                 """
-                            extern "C"
-                            // Second kernel: Sums up the partial sums
-                            __global__ void sumReduction(float* sum, float* blockSum, int numBlocks) {
-                                extern __shared__ float sdata[];
+                    extern "C"
+                    // Second kernel: Sums up the partial sums
+                    __global__ void sumReduction(float* sum, float* blockSum, int blocksPerGrid) {
+                        extern __shared__ float sdata[];
+                    
+                        int tid = threadIdx.x;
+                        if (tid < blocksPerGrid) {
+                            sdata[tid] = blockSum[tid];
+                        } else {
+                            sdata[tid] = 0.0f;
+                        }
                             
-                                int tid = threadIdx.x;
-                                if (tid < numBlocks) {
-                                    sdata[tid] = blockSum[tid];
-                                } else {
-                                    sdata[tid] = 0.0f;
-                                }
-                                    
-                                __syncthreads();
-                                    
-                                // Block-wise reduction
-                                for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                    if (tid < stride) {
-                                        sdata[tid] += sdata[tid + stride];
-                                    }
-                                    __syncthreads();
-                                }
-                                    
-                                // First thread writes the final result
-                                if (tid == 0) {
-                                    *sum = sdata[0];
-                                }
+                        __syncthreads();
+                            
+                        // Block-wise reduction
+                        for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+                            if (tid < stride) {
+                                sdata[tid] += sdata[tid + stride];
                             }
-                        """;
+                            __syncthreads();
+                        }
+                            
+                        // First thread writes the final result
+                        if (tid == 0) {
+                            *sum = sdata[0];
+                        }
+                    }
+                """;
         return loadFromCode(code, "sumReduction");
     }
 }

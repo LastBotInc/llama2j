@@ -39,7 +39,7 @@ public class SumOfSquares extends Kernel {
     public void test(float[] sum, float[] x, int size) {
         float[] copyOfSum = Arrays.copyOf(sum, sum.length);
         float[] copyOfx = Arrays.copyOf(x, x.length);
-        Pointer pSum = cuda.allocateAndCopyToDevice(x, false);
+        Pointer pSum = cuda.allocateAndCopyToDevice(sum, false);
         Pointer px = cuda.allocateAndCopyToDevice(x, false);
         cuda.synchronizeTransfer();
         call(0, pSum, px, size);
@@ -77,14 +77,14 @@ public class SumOfSquares extends Kernel {
                     kernelParameters, null // Kernel- and extra parameters
             );
         } else if (size <= LARGE_KERNEL) {
-            int numberOfThreads = 1024;
-            int numBlocks = (int) Math.ceil((double) size / numberOfThreads);
-            Pointer blockSum = cuda.allocate((long) numBlocks * Float.BYTES);
+            int threadsPerBlock = 1024;
+            int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
+            Pointer blockSum = cuda.allocate((long) blocksPerGrid * Float.BYTES);
             // exp and sum
             {
-                int sharedMemory = numberOfThreads * Float.BYTES;
+                int sharedMemory = threadsPerBlock * Float.BYTES;
                 int blockSizeX = 1024;
-                int gridSizeX = numBlocks;
+                int gridSizeX = blocksPerGrid;
 
 //                __global__ void localSumOfSquares(float* blockSum, float* x, int size) {
                 Pointer kernelParameters = Pointer.to(
@@ -102,15 +102,15 @@ public class SumOfSquares extends Kernel {
 //            cuda.synchronizeKernel(kernelStreamId);
             // reduction
             {
-                int blockSizeX = findNextPowerOf2(numBlocks);
+                int blockSizeX = findNextPowerOf2(blocksPerGrid);
                 int gridSizeX = 1;
                 int sharedMemory = blockSizeX * Float.BYTES;
 
-//                __global__ void sumReduction(float* sum, float* blockSum, int numBlocks) {
+//                __global__ void sumReduction(float* sum, float* blockSum, int blocksPerGrid) {
                 Pointer kernelParameters = Pointer.to(
                         Pointer.to(sum),
                         Pointer.to(blockSum),
-                        Pointer.to(new int[]{numBlocks}),
+                        Pointer.to(new int[]{blocksPerGrid}),
                         Pointer.to(new int[]{size})
                 );
                 cuLaunchKernel(largeReductionKernel,
@@ -203,11 +203,11 @@ public class SumOfSquares extends Kernel {
                 """
                             extern "C"
                             // Second kernel: Sums up the partial sums
-                            __global__ void sumReduction(float* sum, float* blockSum, int numBlocks, int size) {
+                            __global__ void sumReduction(float* sum, float* blockSum, int blocksPerGrid, int size) {
                                 extern __shared__ float sdata[];
                             
                                 int tid = threadIdx.x;
-                                if (tid < numBlocks) {
+                                if (tid < blocksPerGrid) {
                                     sdata[tid] = blockSum[tid];
                                 } else {
                                     sdata[tid] = 0.0f;

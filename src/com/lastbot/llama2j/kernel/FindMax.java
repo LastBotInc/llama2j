@@ -77,14 +77,14 @@ public class FindMax extends Kernel {
                     kernelParameters, null // Kernel- and extra parameters
             );
         } else if (size <= LARGE_KERNEL) {
-            int numberOfThreads = 1024;
-            int numBlocks = (int) Math.ceil((double) size / numberOfThreads);
-            Pointer blockMax = cuda.allocate((long) numBlocks * Float.BYTES);
+            int threadsPerBlock = 1024;
+            int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
+            Pointer blockMax = cuda.allocate((long) blocksPerGrid * Float.BYTES);
             // exp and sum
             {
-                int sharedMemory = numberOfThreads * Float.BYTES;
+                int sharedMemory = threadsPerBlock * Float.BYTES;
                 int blockSizeX = 1024;
-                int gridSizeX = numBlocks;
+                int gridSizeX = blocksPerGrid;
 
 //                __global__ void localMax(float *blockMax, float *x, int size) {
                 Pointer kernelParameters = Pointer.to(
@@ -102,15 +102,15 @@ public class FindMax extends Kernel {
 //            cuda.synchronizeKernel(kernelStreamId);
             // reduction
             {
-                int blockSizeX = findNextPowerOf2(numBlocks);
+                int blockSizeX = findNextPowerOf2(blocksPerGrid);
                 int gridSizeX = 1;
                 int sharedMemory = blockSizeX * Float.BYTES;
 
-//                __global__ void maxReduction(float *max, float *blockMax, int numBlocks) {
+//                __global__ void maxReduction(float *max, float *blockMax, int blocksPerGrid) {
                 Pointer kernelParameters = Pointer.to(
                         Pointer.to(max),
                         Pointer.to(blockMax),
-                        Pointer.to(new int[]{numBlocks})
+                        Pointer.to(new int[]{blocksPerGrid})
                 );
                 cuLaunchKernel(largeReductionKernel,
                         gridSizeX, 1, 1,          // Grid dimension
@@ -201,12 +201,12 @@ public class FindMax extends Kernel {
                 """
                         #include <cfloat>
                         extern "C"
-                        __global__ void maxReduction(float *max, float *blockMax, int numBlocks) {
+                        __global__ void maxReduction(float *max, float *blockMax, int blocksPerGrid) {
                             extern __shared__ float sdata[];
                         
                             int tid = threadIdx.x;
                         
-                            if(tid < numBlocks) {
+                            if(tid < blocksPerGrid) {
                                 sdata[tid] = blockMax[tid];
                             } else {
                                 sdata[tid] = -FLT_MAX;
@@ -215,7 +215,7 @@ public class FindMax extends Kernel {
                         
                             // Binary tree reduction
                             for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                if (tid < stride && tid + stride < numBlocks) {
+                                if (tid < stride && tid + stride < blocksPerGrid) {
                                     sdata[tid] = fmaxf(sdata[tid], sdata[tid + stride]);
                                 }
                                 __syncthreads();
