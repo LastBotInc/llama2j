@@ -16,10 +16,6 @@ import static jcuda.driver.JCudaDriver.cuModuleGetFunction;
 import static jcuda.driver.JCudaDriver.cuModuleLoad;
 
 public abstract class Kernel {
-    protected static final String SIZE_0 = "<SIZE_0>";
-    protected static final String SIZE_1 = "<SIZE_1>";
-    protected static final String SIZE_2 = "<SIZE_2>";
-
     protected final ContextCUDA cuda;
 
     protected final String name;
