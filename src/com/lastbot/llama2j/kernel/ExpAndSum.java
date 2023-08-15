@@ -61,7 +61,7 @@ public class ExpAndSum extends Kernel {
                 x, copyOfx, 1e-5f);
     }
 
-    private void call(int kernelStreamId, Pointer sum, Pointer x, Pointer maxValue, int index, int size) {
+    public void call(int kernelStreamId, Pointer sum, Pointer x, Pointer maxValue, int index, int size) {
         CUstream stream = cuda.getCUKernelStream(kernelStreamId);
         if (size <= SMALL_KERNEL) {
             int blockSizeX = findNextPowerOf2(size);
