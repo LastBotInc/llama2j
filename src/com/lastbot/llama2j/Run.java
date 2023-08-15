@@ -28,14 +28,6 @@ public class Run {
     private static final boolean USE_CPU = true;
     private static final boolean USE_CUDA = true;
 
-    private static final int THREAD_COUNT = 32;
-
-    private static final BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(THREAD_COUNT, false);
-
-    private static final RejectedExecutionHandler handler = new ThreadPoolExecutor.CallerRunsPolicy();
-    private static final ExecutorService executor =
-            new ThreadPoolExecutor(THREAD_COUNT, THREAD_COUNT, 5L, TimeUnit.MINUTES, queue, handler);
-
     private static final String MODELS_DIRECTORY = "models";
     private static final String TOKENIZER_FILE = "tokenizer.bin";
 
@@ -68,9 +60,10 @@ public class Run {
     }
 
 // ----------------------------------------------------------------------------
-// kernelizable functions for transformer
+// The below commented-out functions show how to implement rmsnorm() or softmax()
+// in case the upstream code changes and requires to use them additionally.
 
-    // rmsnorm
+// rmsnorm
 
 //    private static void rmsnorm(float[] out, int outIndex, float[] x, float[] weight, int weightIndex, int size) {
 //        float[] ss = {0f};
@@ -78,15 +71,7 @@ public class Run {
 //        normalizeAndScale(out, x, weight, weightIndex, ss, size);
 //    }
 
-    // softmax
-
-
-//    private static void normalize(float[] x, float[] divider, int index, int size) {
-//        float s = divider[0];
-//        for (int i = 0; i < size; i++) {
-//            x[index + i] /= s;
-//        }
-//    }
+// softmax
 
 //    private static void softmax(float[] x, int index, int size) {
 //        // find max value (for numerical stability)
@@ -99,6 +84,23 @@ public class Run {
 //
 //        // normalize
 //        normalize(sum, x, index, size);
+//    }
+
+    private static final int THREAD_COUNT = 32;
+
+    private static final BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(THREAD_COUNT, false);
+
+    private static final RejectedExecutionHandler handler = new ThreadPoolExecutor.CallerRunsPolicy();
+    private static final ExecutorService executor =
+            new ThreadPoolExecutor(THREAD_COUNT, THREAD_COUNT, 5L, TimeUnit.MINUTES, queue, handler);
+
+    /**
+     *  This function is left here as a special case to make the testing with CPU only faster, as 99% of
+     *  CPU time is spent here.
+     */
+
+//    private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
+//        matmulParallel(xout, x, w, weightIndex, n, d);
 //    }
 
     private static void matmulParallel(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
@@ -129,24 +131,6 @@ public class Run {
             latch.await();
         } catch (InterruptedException e) {
             LLogger.error("fastMatmul was interrupted");
-        }
-    }
-
-    private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
-        matmulParallel(xout, x, w, weightIndex, n, d);
-    }
-
-    private static void matmulSimple(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
-        // W (d,n) @ x (n,) -> xout (d,)
-        // by far the most amount of time is spent inside this little function
-        int i;
-        float val;
-        for (i = 0; i < d; i++) {
-            val = 0.0f;
-            for (int j = 0; j < n; j++) {
-                val += w[weightIndex + i * n + j] * x[j];
-            }
-            xout[i] = val;
         }
     }
 
@@ -194,9 +178,9 @@ public class Run {
             cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_att_weight, layer * dim, ss, dim);
 
             // qkv matmuls for this position
-            matmul(s.q, s.xb, w.l_wq, layer * dim * dim, dim, dim);
-            matmul(s.k, s.xb, w.l_wk, layer * dim * dim, dim, dim);
-            matmul(s.v, s.xb, w.l_wv, layer * dim * dim, dim, dim);
+            cuda.matMul.test(s.q, s.xb, w.l_wq, layer * dim * dim, dim, dim);
+            cuda.matMul.test(s.k, s.xb, w.l_wk, layer * dim * dim, dim, dim);
+            cuda.matMul.test(s.v, s.xb, w.l_wv, layer * dim * dim, dim, dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             for (int i = 0; i < dim; i += 2) {
@@ -284,8 +268,7 @@ public class Run {
             }
 
             // final matmul to get the output of the attention
-            matmul(s.xb2, s.xb, w.l_wo, layer * dim * dim, dim, dim);
-
+            cuda.matMul.test(s.xb2, s.xb, w.l_wo, layer * dim * dim, dim, dim);
             // residual connection back into x
             cuda.accum.test(s.x, s.xb2, dim);
 
@@ -298,8 +281,8 @@ public class Run {
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            matmul(s.hb, s.xb, w.l_w1, layer * dim * hidden_dim, dim, hidden_dim);
-            matmul(s.hb2, s.xb, w.l_w3, layer * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.test(s.hb, s.xb, w.l_w1, layer * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.test(s.hb2, s.xb, w.l_w3, layer * dim * hidden_dim, dim, hidden_dim);
 
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
             for (int i = 0; i < hidden_dim; i++) {
@@ -312,7 +295,7 @@ public class Run {
             }
 
             // final matmul to get the output of the ffn
-            matmul(s.xb, s.hb, w.l_w2, layer * dim * hidden_dim, hidden_dim, dim);
+            cuda.matMul.test(s.xb, s.hb, w.l_w2, layer * dim * hidden_dim, hidden_dim, dim);
 
             // residual connection
             cuda.accum.test(s.x, s.xb, dim);
@@ -325,7 +308,7 @@ public class Run {
         cuda.weightNormalizeAndScale.test(s.x, s.x, w.rms_final_weight, 0, ss, dim);
 
         // classifier into logits
-        matmul(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+        cuda.matMul.test(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
     }
 
     private static void transformerCUDA(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
