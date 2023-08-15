@@ -55,7 +55,7 @@ public class FindMax extends Kernel {
                 max, copyOfMax, 1e-2f);
     }
 
-    private void call(int kernelStreamId, Pointer max, Pointer x, int index, int size) {
+    public void call(int kernelStreamId, Pointer max, Pointer x, int index, int size) {
         CUstream stream = cuda.getCUKernelStream(kernelStreamId);
         if (size <= SMALL_KERNEL) {
             int blockSizeX = findNextPowerOf2(size);
