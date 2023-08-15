@@ -95,15 +95,6 @@ public class Run {
 
     // softmax
 
-    private static void findMax(float[] out, float[] x, int index, int size) {
-        float max_val = x[index]; // index + 0
-        for (int i = 1; i < size; i++) {
-            if (x[index + i] > max_val) {
-                max_val = x[index + i];
-            }
-        }
-        out[0] = max_val;
-    }
 
     private static void normalize(float[] sum, float[] x, int index, int size) {
         float s = sum[0];
@@ -278,7 +269,7 @@ public class Run {
 
                 // find max value (for numerical stability)
                 float[] max = {0f};
-                findMax(max, s.att, attentionIndex, pos + 1);
+                cuda.findMax.test(max, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
                 float[] sum = {0f};
@@ -661,7 +652,7 @@ public class Run {
 
                     // find max value (for numerical stability)
                     float[] max = {0f};
-                    findMax(max, state.logits, 0, config.vocab_size);
+                    context.lastCuda().findMax.test(max, state.logits, 0, config.vocab_size);
 
                     // exp and sum
                     float[] sum = {0f};
@@ -696,7 +687,7 @@ public class Run {
                 start = time();
             }
         }
-        Output.emit("\n"); // explicit print the initial BOS token for stylistic symmetry reasons
+        Output.emit("\n");
 
         long end = time();
 

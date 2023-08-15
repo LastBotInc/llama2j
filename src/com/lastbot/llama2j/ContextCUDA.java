@@ -62,7 +62,7 @@ public class ContextCUDA implements Closeable {
         }
         this.accum = new Accum(this);
         this.expAndSum = new ExpAndSum(this);
-        this.findMax = null;
+        this.findMax = new FindMax(this);
         this.matMul = null;
         this.normalize = null;
         this.sumOfSquares = null;
