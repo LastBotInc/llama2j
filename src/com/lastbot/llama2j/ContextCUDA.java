@@ -1,11 +1,14 @@
 package com.lastbot.llama2j;
 
+import com.lastbot.llama2j.kernel.*;
 import jcuda.Pointer;
 import jcuda.Sizeof;
+import jcuda.driver.CUstream;
 import jcuda.runtime.JCuda;
 import jcuda.runtime.cudaStream_t;
 
 import java.io.Closeable;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,6 +19,15 @@ import static jcuda.runtime.cudaMemcpyKind.*;
 public class ContextCUDA implements Closeable {
     private static final int KERNEL_STREAM_COUNT = 3;
 
+    // optimized kernels for transformer
+    public final Accum accum;
+    public final ExpAndSum expAndSum;
+    public final FindMax findMax;
+    public final MatMul matMul;
+    public final Normalize normalize;
+    public final SumOfSquares sumOfSquares;
+    public final WeightNormalizeAndScale weightNormalizeAndScale;
+
     static {
         // Initialize the JCuda driver API
         JCuda.setExceptionsEnabled(true);
@@ -25,9 +37,11 @@ public class ContextCUDA implements Closeable {
     private final int deviceId; // device id
     private final List<Pointer> memoryPointerList = new ArrayList<>();
     private final cudaStream_t transferStream;
+    private final CUstream CUTransferStream;
     private final cudaStream_t[] kernelStreams = new cudaStream_t[KERNEL_STREAM_COUNT];
+    private final CUstream[] CUKernelStreams = new CUstream[KERNEL_STREAM_COUNT];
 
-    public ContextCUDA(String name, int deviceId) {
+    public ContextCUDA(String name, int deviceId) throws IOException {
         this.name = name;
         this.deviceId = deviceId;
 
@@ -37,13 +51,22 @@ public class ContextCUDA implements Closeable {
         if (isError(cudaStreamCreate(transferStream))) {
             throw new RuntimeException();
         }
+        this.CUTransferStream = new CUstream(transferStream);
 
         for (int k = 0; k < KERNEL_STREAM_COUNT; k++) {
             this.kernelStreams[k] = new cudaStream_t();
             if (isError(cudaStreamCreate(kernelStreams[k]))) {
                 throw new RuntimeException();
             }
+            this.CUKernelStreams[k] = new CUstream(kernelStreams[k]);
         }
+        this.accum = new Accum(this);
+        this.expAndSum = new ExpAndSum(this);
+        this.findMax = null;
+        this.matMul = null;
+        this.normalize = null;
+        this.sumOfSquares = null;
+        this.weightNormalizeAndScale = null;
     }
 
     public void setDevice() {
@@ -52,8 +75,8 @@ public class ContextCUDA implements Closeable {
         }
     }
 
-    public Pointer allocateAndCopyToDevice(float[] hostArray) {
-        Pointer targetDeviceArray = allocateFloatArray(hostArray.length);
+    public Pointer allocateAndCopyToDevice(float[] hostArray, boolean autoFree) {
+        Pointer targetDeviceArray = allocateFloatArray(hostArray.length, autoFree);
 
         long byteSize = (long) hostArray.length * Sizeof.FLOAT;
 
@@ -67,8 +90,8 @@ public class ContextCUDA implements Closeable {
         return targetDeviceArray;
     }
 
-    public Pointer allocateAndCopyToDeviceWithOffset(float[] hostArray, int offset, int size) {
-        Pointer targetDeviceArray = allocateFloatArray(size);
+    public Pointer allocateAndCopyToDeviceWithOffset(float[] hostArray, int offset, int size, boolean autoFree) {
+        Pointer targetDeviceArray = allocateFloatArray(size, autoFree);
 
         Pointer hostArrayOffset = Pointer.to(hostArray).withByteOffset((long) offset * Float.BYTES);
 
@@ -84,7 +107,7 @@ public class ContextCUDA implements Closeable {
         return targetDeviceArray;
     }
 
-    public Pointer allocateFloatArray(long elements) {
+    public Pointer allocateFloatArray(long elements, boolean autoFree) {
         if (elements <= Limits.FLOAT_ARRAY_MAX_SIZE) {
             long byteSize = elements * Sizeof.FLOAT;
 
@@ -95,11 +118,28 @@ public class ContextCUDA implements Closeable {
             if (isError(cudaMalloc(newDeviceArray, byteSize))) {
                 return null;
             }
-            memoryPointerList.add(newDeviceArray);
+            if (autoFree) {
+                memoryPointerList.add(newDeviceArray);
+            }
             return newDeviceArray;
         } else {
             return null;
         }
+    }
+
+    public Pointer allocate(long byteSize) {
+        setDevice();
+
+        // Create device array
+        Pointer newDeviceArray = new Pointer();
+        if (isError(cudaMalloc(newDeviceArray, byteSize))) {
+            return null;
+        }
+        return newDeviceArray;
+    }
+
+    public void free(Pointer pointer) {
+        isError(cudaFree(pointer));
     }
 
     public boolean copyFromHostToDevice(float[] sourceHostArray, Pointer targetDeviceArray) {
@@ -144,7 +184,7 @@ public class ContextCUDA implements Closeable {
         return synchronize(transferStream);
     }
 
-    private boolean synchronizeKernel(int k) {
+    public boolean synchronizeKernel(int k) {
         return !isError(cudaStreamSynchronize(kernelStreams[k]));
     }
 
@@ -180,12 +220,12 @@ public class ContextCUDA implements Closeable {
              ContextCUDA context1 = new ContextCUDA("context1", 1)) {
 
             t1 = System.currentTimeMillis();
-            Pointer d1Pointer = context0.allocateFloatArray(TEST_SIZE);
+            Pointer d1Pointer = context0.allocateFloatArray(TEST_SIZE, true);
             t1b = System.currentTimeMillis();
             context0.copyFromHostToDevice(d1, d1Pointer);
 
             t2 = System.currentTimeMillis();
-            Pointer d2Pointer = context1.allocateFloatArray(TEST_SIZE);
+            Pointer d2Pointer = context1.allocateFloatArray(TEST_SIZE, true);
             t3 = System.currentTimeMillis();
 
             if (d1Pointer != null) {
@@ -235,6 +275,8 @@ public class ContextCUDA implements Closeable {
                     }
                 }
             }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
         LLogger.info("Failure, processing terminated with an error");
     }
@@ -248,8 +290,16 @@ public class ContextCUDA implements Closeable {
         return transferStream;
     }
 
+    public CUstream getCUTransferStream() {
+        return CUTransferStream;
+    }
+
     public cudaStream_t getKernelStream(int k) {
         return kernelStreams[k];
+    }
+
+    public CUstream getCUKernelStream(int k) {
+        return CUKernelStreams[k];
     }
 
     @Override
