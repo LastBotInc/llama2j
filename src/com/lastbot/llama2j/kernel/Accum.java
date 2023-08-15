@@ -41,22 +41,20 @@ public class Accum extends Kernel {
         compareWithThreshold("Accum.call", a, copyOfA, 1e-5f);
     }
 
-    public void call(int kernelStreamId, Pointer a, Pointer b, int n) {
+    public void call(int kernelStreamId, Pointer a, Pointer b, int size) {
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(a),
                 Pointer.to(b),
-                Pointer.to(new int[]{n})
+                Pointer.to(new int[]{size})
         );
 
-        // Set up the kernel launch parameters.
         int blockSizeX = 256;
-        int gridSizeX = (int) Math.ceil((double) n / blockSizeX);
+        int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
-        // Launch the kernel function.
         cuLaunchKernel(kernel,
                 gridSizeX, 1, 1,          // Grid dimension
                 blockSizeX, 1, 1,      // Block dimension
-                0, new CUstream(cuda.getKernelStream(kernelStreamId)),  // Shared memory size and stream
+                0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
         );
     }
