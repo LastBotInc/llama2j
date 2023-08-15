@@ -67,18 +67,6 @@ public class Run {
 
     // rmsnorm
 
-    private static void sumOfSquares(float[] out, float[] x, int size) {
-        // calculate sum of squares
-        float ss = 0.0f;
-        for (int j = 0; j < size; j++) {
-            ss += x[j] * x[j];
-        }
-        ss /= size;
-        ss += 1e-5f;
-        ss = 1.0f / (float) Math.sqrt(ss);
-        out[0] = ss;
-    }
-
     private static void weightNormalizeAndScale(float[] out, float[] x, float[] weight, int weightIndex,
                                                 float[] sumOfSquares, int size) {
         float ss = sumOfSquares[0];
@@ -205,7 +193,7 @@ public class Run {
 
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            sumOfSquares(ss, s.x, dim);
+            cuda.sumOfSquares.test(ss, s.x, dim);
             weightNormalizeAndScale(s.xb, s.x, w.l_rms_att_weight, layer * dim, ss, dim);
 
             // qkv matmuls for this position
@@ -308,7 +296,7 @@ public class Run {
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
             ss[0] = 0f;
-            sumOfSquares(ss, s.x, dim);
+            cuda.sumOfSquares.test(ss, s.x, dim);
             weightNormalizeAndScale(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, ss, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
@@ -336,7 +324,7 @@ public class Run {
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
         ss[0] = 0f;
-        sumOfSquares(ss, s.x, dim);
+        cuda.sumOfSquares.test(ss, s.x, dim);
         weightNormalizeAndScale(s.x, s.x, w.rms_final_weight, 0, ss, dim);
 
         // classifier into logits
