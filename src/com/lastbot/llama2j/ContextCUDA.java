@@ -23,9 +23,9 @@ public class ContextCUDA implements Closeable {
     public final Accum accum;
     public final ExpAndSum expAndSum;
     public final FindMax findMax;
+    public final SumOfSquares sumOfSquares;
     public final MatMul matMul;
     public final Normalize normalize;
-    public final SumOfSquares sumOfSquares;
     public final WeightNormalizeAndScale weightNormalizeAndScale;
 
     static {
@@ -63,9 +63,9 @@ public class ContextCUDA implements Closeable {
         this.accum = new Accum(this);
         this.expAndSum = new ExpAndSum(this);
         this.findMax = new FindMax(this);
+        this.sumOfSquares = new SumOfSquares(this);
         this.matMul = null;
         this.normalize = null;
-        this.sumOfSquares = null;
         this.weightNormalizeAndScale = null;
     }
 
