@@ -1,9 +1,14 @@
 package com.lastbot.llama2j;
 
 /*
-Inference for Llama-2 Transformer model in pure Java.
+Inference for Llama-2 Transformer model in pure Java and with optional CUDA.
 
-Adapted from: :https://github.com/karpathy/llama2.c
+Objectives: reasonable (among the world's fastest) latency, with the absolutely leading
+best throughput on systems with one or multiple NVIDIA gaming GPUs such as 4090.
+
+Adapted from and inspired by: :https://github.com/karpathy/llama2.c
+
+See file upstream.txt for details on the commit that this version is synchronized with.
 
 */
 
@@ -639,7 +644,7 @@ public class Run {
                     context.lastCuda().expAndSum.test(sum, state.logits, max, 0, config.vocab_size);
 
                     // normalize
-                    context.lastCuda().normalize.test(state.logits, sum,0, config.vocab_size);
+                    context.lastCuda().normalize.test(state.logits, sum, 0, config.vocab_size);
 
                     if (commandLine.getTopp() == null) {
                         // we sample from this distribution to get the next token
