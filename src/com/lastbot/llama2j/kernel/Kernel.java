@@ -163,12 +163,9 @@ public abstract class Kernel {
                 errors++;
             }
         }
-        if (maxDiff > 0f) {
-            LLogger.info("Compare " + function + " maxDiff " + maxDiff);
-        }
         if (errors > 0) {
             LLogger.error("Compare " + function + " total of " + String.format("%,d", errors) + " out of " +
-                    String.format("%,d", length));
+                    String.format("%,d", length) + " maxDiff " + maxDiff);
         }
     }
 
