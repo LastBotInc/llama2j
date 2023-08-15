@@ -105,18 +105,6 @@ public class Run {
         out[0] = max_val;
     }
 
-    private static void expAndSum(float[] sum, float[] x, float[] maxValue, int index, int size) {
-        float s = 0.0f;
-        float max_val = maxValue[0];
-
-        for (int i = 0; i < size; i++) {
-            // zzz consider expm1
-            x[index + i] = (float) Math.exp(x[index + i] - max_val);
-            s += x[index + i];
-        }
-        sum[0] = s;
-    }
-
     private static void normalize(float[] sum, float[] x, int index, int size) {
         float s = sum[0];
         for (int i = 0; i < size; i++) {
@@ -294,7 +282,7 @@ public class Run {
 
                 // exp and sum
                 float[] sum = {0f};
-                expAndSum(sum, s.att, max, attentionIndex, pos + 1);
+                cuda.expAndSum.test(sum, s.att, max, attentionIndex, pos + 1);
 
                 // normalize
                 normalize(sum, s.att, attentionIndex, pos + 1);
@@ -677,7 +665,7 @@ public class Run {
 
                     // exp and sum
                     float[] sum = {0f};
-                    expAndSum(sum, state.logits, max, 0, config.vocab_size);
+                    context.lastCuda().expAndSum.test(sum, state.logits, max, 0, config.vocab_size);
 
                     // normalize
                     normalize(sum, state.logits, 0, config.vocab_size);
