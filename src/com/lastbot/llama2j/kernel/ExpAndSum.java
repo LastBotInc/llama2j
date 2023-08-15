@@ -165,7 +165,9 @@ public class ExpAndSum extends Kernel {
                                     __syncthreads();  // Ensure all threads in block are in sync after each step
                                 }
 
-                                sum[0] = sdata[0];
+                                if (tid == 0) {
+                                    sum[0] = sdata[0];
+                                }
                             }
                         """;
         return loadFromCode(code, "expAndSum");
@@ -237,7 +239,7 @@ public class ExpAndSum extends Kernel {
                                     
                                 // First thread writes the final result
                                 if (tid == 0) {
-                                *sum = sdata[0];
+                                    *sum = sdata[0];
                                 }
                             }
                         """;
