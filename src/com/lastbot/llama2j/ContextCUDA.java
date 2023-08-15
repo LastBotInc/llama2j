@@ -66,7 +66,7 @@ public class ContextCUDA implements Closeable {
         this.sumOfSquares = new SumOfSquares(this);
         this.matMul = null;
         this.normalize = null;
-        this.weightNormalizeAndScale = null;
+        this.weightNormalizeAndScale = new WeightNormalizeAndScale(this);
     }
 
     public void setDevice() {
