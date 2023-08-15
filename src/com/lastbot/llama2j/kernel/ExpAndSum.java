@@ -5,6 +5,8 @@ import jcuda.Pointer;
 import jcuda.driver.CUfunction;
 import jcuda.driver.CUstream;
 
+import java.util.Arrays;
+
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class ExpAndSum extends Kernel {
@@ -20,6 +22,43 @@ public class ExpAndSum extends Kernel {
         smallKernel = createSmall();
         largeSumKernel = createLargeSum();
         largeReductionKernel = createLargeReduction();
+    }
+
+    public static void call(float[] sum, float[] x, float[] maxValue, int index, int size) {
+        float s = 0.0f;
+        float max_val = maxValue[0];
+
+        for (int i = 0; i < size; i++) {
+            // zzz consider expm1
+            x[index + i] = (float) Math.exp(x[index + i] - max_val);
+            s += x[index + i];
+        }
+        sum[0] = s;
+    }
+
+    public void test(float[] sum, float[] x, float[] maxValue, int index, int size) {
+        float[] copyOfSum = Arrays.copyOf(sum, sum.length);
+        float[] copyOfx = Arrays.copyOf(x, x.length);
+        Pointer pSum = cuda.allocateAndCopyToDevice(x, false);
+        Pointer px = cuda.allocateAndCopyToDevice(x, false);
+        Pointer pMaxValue = cuda.allocateAndCopyToDevice(maxValue, false);
+        cuda.synchronizeTransfer();
+        call(0, pSum, px, pMaxValue, index, size);
+        cuda.synchronizeKernel(0);
+        cuda.copyFromDeviceToHost(pSum, sum);
+        cuda.copyFromDeviceToHost(px, x);
+        cuda.free(pSum);
+        cuda.free(px);
+        cuda.free(pMaxValue);
+
+        call(copyOfSum, copyOfx, maxValue, index, size);
+
+        compareWithThreshold("ExpAndSum.call (" + (size <= SMALL_KERNEL ? "small" : "large") +
+                        ") sum ",
+                sum, copyOfSum, 1e-2f);
+        compareWithThreshold("ExpAndSum.call (" + (size <= SMALL_KERNEL ? "small" : "large") +
+                        ") x ",
+                x, copyOfx, 1e-5f);
     }
 
     private void call(int kernelStreamId, Pointer sum, Pointer x, Pointer maxValue, int index, int size) {
@@ -69,6 +108,7 @@ public class ExpAndSum extends Kernel {
                         kernelParameters, null // Kernel- and extra parameters
                 );
             }
+//            cuda.synchronizeKernel(kernelStreamId);
             // reduction
             {
                 int blockSizeX = findNextPowerOf2(numberOfBlocks);
@@ -107,6 +147,8 @@ public class ExpAndSum extends Kernel {
                                     float max_val = maxValue[0];
 
                                     x[index + tid] = expf(x[index + tid] - max_val);
+                                    
+//                                    printf("expf %.5f", x[index + tid]);
 
                                     // Store the value in shared memory for reduction
                                     sdata[threadIdx.x] = x[index + tid];
@@ -123,10 +165,7 @@ public class ExpAndSum extends Kernel {
                                     __syncthreads();  // Ensure all threads in block are in sync after each step
                                 }
 
-                                // First thread of the block writes the result to the global memory
-                                if (threadIdx.x == 0) {
-                                    atomicAdd(sum, sdata[0]);
-                                }
+                                sum[0] = sdata[0];
                             }
                         """;
         return loadFromCode(code, "expAndSum");
