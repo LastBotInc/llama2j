@@ -56,7 +56,7 @@ public class SumOfSquares extends Kernel {
                 sum, copyOfSum, 1e-2f);
     }
 
-    private void call(int kernelStreamId, Pointer sum, Pointer x, int size) {
+    public void call(int kernelStreamId, Pointer sum, Pointer x, int size) {
         CUstream stream = cuda.getCUKernelStream(kernelStreamId);
         if (size <= SMALL_KERNEL) {
             int blockSizeX = findNextPowerOf2(size);
