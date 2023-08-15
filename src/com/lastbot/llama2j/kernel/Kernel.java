@@ -26,6 +26,7 @@ public abstract class Kernel {
 
     private static final String KERNEL_DIRECTORY = "src/cuda";
 
+    private static final String GENERATED_CUDA_SOURCE_PREFIX = "gen_";
     private static final String CUDA_SOURCE_EXTENSION = ".cu";
     private static final String CUBIN_EXTENSION = ".cubin";
 
@@ -73,7 +74,7 @@ public abstract class Kernel {
     }
 
     protected CUfunction loadFromCode(String code, String functionName) {
-        String sourceFileName = name + "_" + functionName + CUDA_SOURCE_EXTENSION;
+        String sourceFileName = GENERATED_CUDA_SOURCE_PREFIX + name + "_" + functionName + CUDA_SOURCE_EXTENSION;
         String sourceFilePath = KERNEL_DIRECTORY + File.separator + sourceFileName;
         try (PrintWriter writer = new PrintWriter(sourceFilePath)) {
             writer.println(code);

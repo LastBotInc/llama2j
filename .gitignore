@@ -34,3 +34,5 @@ models
 
 src/cuda/cmake-build-debug
 src/cuda/*.cubin
+src/cuda/gen_*.cu
+
