@@ -114,11 +114,12 @@ public class Run {
             executor.execute(() -> {
                 try {
                     float val;
+                    int weightPos;
                     for (int i = finalThreadId * sizePerThread; i < end; i++) {
-                        int base = weightIndex + i * n;
                         val = 0.0f;
+                        weightPos = weightIndex + i * n;
                         for (int j = 0; j < n; j++) {
-                            val += w[base + j] * x[j];
+                            val += w[weightPos + j] * x[j];
                         }
                         xout[i] = val;
                     }
@@ -147,9 +148,9 @@ public class Run {
 
     private static void transformerCPU(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
         // a few convenience variables
-        int dim = p.dim;
-        int hidden_dim = p.hidden_dim;
-        int head_size = dim / p.n_heads;
+        final int dim = p.dim;
+        final int hidden_dim = p.hidden_dim;
+        final int head_size = dim / p.n_heads;
 
         int cudaIndex = 0;
         ContextCUDA cuda = context.cudas[cudaIndex];
