@@ -33,6 +33,7 @@ public class Accum extends Kernel {
         call(0, pa, pb, size);
         cuda.synchronizeKernel(0);
         cuda.copyFromDeviceToHost(pa, a);
+        cuda.synchronizeTransfer();
         cuda.free(pa);
         cuda.free(pb);
 
@@ -48,7 +49,7 @@ public class Accum extends Kernel {
                 Pointer.to(new int[]{size})
         );
 
-        int blockSizeX = 256;
+        int blockSizeX = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
         cuLaunchKernel(kernel,
