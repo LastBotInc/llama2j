@@ -31,6 +31,8 @@ public abstract class Kernel {
     private static final String CUDA_ARCHITECTURE = "compute_89";
     private static final String CUDA_CODE = "sm_89";
 
+    public static final int MAX_THREADS_PER_BLOCK = 1024;
+
     private final Map<KernelSize, CUfunction> functionByKernelSizeMap = new HashMap<>();
 
     protected static CUfunction defaultFunction;
