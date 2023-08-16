@@ -1,10 +1,10 @@
 ---------------- llama2.c ----------------
 #make runomp
 
---checkpoint stories15M.bin
+./run stories15M.bin -i "One day, Lily met a Shoggoth"
 achieved tok/s: 1235.3
 
-./run stories42M.bin
+./run stories42M.bin -i "One day, Lily met a Shoggoth"
 achieved tok/s: 843.0
 
 MP_NUM_THREADS=8 ./run llama2_7b.bin -t 1.0 -n 256 -i "One day, Lily met a Shoggoth"
