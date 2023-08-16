@@ -6,6 +6,7 @@ import java.io.RandomAccessFile;
 import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.Charset;
 
 public class BinFileReader implements Closeable {
     private static final int ALIGNED_BY_4_BYTES_MAX_BUFFER_SIZE = (Integer.MAX_VALUE / 4) * 4;
@@ -84,13 +85,13 @@ public class BinFileReader implements Closeable {
         return buffers[currentBuffer].getInt();
     }
 
-    public String nextString(int length) {
+    public String nextString(int length, Charset charset) {
         rollover(length);
-        char[] buf = new char[length];
+        byte[] buf = new byte[length];
         for (int i = 0; i < length; i++) {
-            buf[i] = (char) buffers[currentBuffer].get();
+            buf[i] = buffers[currentBuffer].get();
         }
-        String s = new String(buf, 0, length);
+        String s = new String(buf, charset);
         return s;
     }
 
