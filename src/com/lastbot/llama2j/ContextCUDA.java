@@ -26,7 +26,7 @@ public class ContextCUDA implements Closeable {
     // optimized kernels for transformer
     public final Accum accum;
     public final ApplyRope applyRope;
-    public final AttentionScore attentionScore;
+    public final Attention attention;
     public final ExpAndSum expAndSum;
     public final FindMax findMax;
     public final SumOfSquares sumOfSquares;
@@ -71,7 +71,7 @@ public class ContextCUDA implements Closeable {
 
         this.accum = new Accum(this);
         this.applyRope = new ApplyRope(this);
-        this.attentionScore = new AttentionScore(this);
+        this.attention = new Attention(this);
         this.expAndSum = new ExpAndSum(this);
         this.findMax = new FindMax(this);
         this.sumOfSquares = new SumOfSquares(this);
@@ -217,12 +217,12 @@ public class ContextCUDA implements Closeable {
         setDevice();
         try {
             if (isError(cudaStreamSynchronize(kernelStreams[k]))) {
-                LLogger.error(">>> synchronizeKernel isError");
+                LLogger.error("synchronizeKernel isError");
                 throw new RuntimeException("synchronizeKernel " + k + " failed");
             }
         }
         catch (CudaException e) {
-            LLogger.error(">>> synchronizeKernel CudaException", e);
+            LLogger.error("synchronizeKernel CudaException", e);
         }
     }
 
