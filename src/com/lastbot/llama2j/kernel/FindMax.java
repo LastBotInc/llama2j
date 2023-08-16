@@ -45,6 +45,7 @@ public class FindMax extends Kernel {
         call(0, pMax, px, index, size);
         cuda.synchronizeKernel(0);
         cuda.copyFromDeviceToHost(pMax, max);
+        cuda.synchronizeTransfer();
         cuda.free(pMax);
         cuda.free(px);
 
@@ -71,19 +72,19 @@ public class FindMax extends Kernel {
             );
 
             cuLaunchKernel(smallKernel,
-                    gridSizeX, 1, 1,          // Grid dimension
+                    gridSizeX, 1, 1,         // Grid dimension
                     blockSizeX, 1, 1,      // Block dimension
                     sharedMemory, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
             );
         } else if (size <= LARGE_KERNEL) {
-            int threadsPerBlock = 1024;
+            int threadsPerBlock = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
             Pointer blockMax = cuda.allocate((long) blocksPerGrid * Float.BYTES);
             // exp and sum
             {
                 int sharedMemory = threadsPerBlock * Float.BYTES;
-                int blockSizeX = 1024;
+                int blockSizeX = threadsPerBlock;
                 int gridSizeX = blocksPerGrid;
 
 //                __global__ void localMax(float *blockMax, float *x, int size) {
@@ -103,7 +104,7 @@ public class FindMax extends Kernel {
             // reduction
             {
                 int blockSizeX = findNextPowerOf2(blocksPerGrid);
-                int gridSizeX = 1;
+                int gridSizeX = (int) Math.ceil((double) blocksPerGrid / blockSizeX);
                 int sharedMemory = blockSizeX * Float.BYTES;
 
 //                __global__ void maxReduction(float *max, float *blockMax, int blocksPerGrid) {
