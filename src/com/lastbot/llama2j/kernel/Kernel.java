@@ -26,7 +26,8 @@ public abstract class Kernel {
     private static final String CUDA_SOURCE_EXTENSION = ".cu";
     private static final String CUBIN_EXTENSION = ".cubin";
 
-    private static final String CUDA_DIR = "/usr/local/cuda";
+//    private static final String CUDA_DIR = "/usr/local/cuda";
+    private static final String CUDA_DIR = "/usr/local/cuda-12.2";
     private static final String NVCC_PATH = CUDA_DIR + File.separator + "bin" + File.separator + "nvcc";
     private static final String CUDA_ARCHITECTURE = "compute_89";
     private static final String CUDA_CODE = "sm_89";
