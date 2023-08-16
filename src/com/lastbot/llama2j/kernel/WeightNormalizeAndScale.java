@@ -65,7 +65,7 @@ public class WeightNormalizeAndScale extends Kernel {
         );
 
         // Set up the kernel launch parameters.
-        int blockSizeX = 256;
+        int blockSizeX = Math.min(findNextPowerOf2(size), 1024);
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
         cuLaunchKernel(kernel,
