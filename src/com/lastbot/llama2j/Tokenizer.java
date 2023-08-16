@@ -207,7 +207,7 @@ public class Tokenizer implements Closeable {
         // careful, some tokens designate raw bytes, and look like e.g. '<0x01>'
         Matcher matcher = RAW_BYTE_TOKEN_PATTERN.matcher(token_str);
         if (matcher.matches()) {
-            // ok this token is a raw byte token, carefuly to only print printable chars or whitespace
+            // ok this token is a raw byte token, carefully to only print printable chars or whitespace
             // some of the other bytes can be various control codes, backspace, etc. => skip
             String hexString = matcher.group(1);
             try {
