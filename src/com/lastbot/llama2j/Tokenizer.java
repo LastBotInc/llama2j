@@ -175,7 +175,30 @@ public class Tokenizer implements Closeable {
         return result;
     }
 
-    private static final Pattern RAW_BYTE_TOKEN_PATTERN = Pattern.compile("<0x(\\d*)>");
+    public static void main(String[] args) {
+        String token_str = "<0x40>";
+        Matcher matcher = RAW_BYTE_TOKEN_PATTERN.matcher(token_str);
+        String output;
+        if (matcher.matches()) {
+            // ok this token is a raw byte token, carefuly to only print printable chars or whitespace
+            // some of the other bytes can be various control codes, backspace, etc. => skip
+            String hexString = matcher.group(1);
+            try {
+                int value = Integer.parseInt(hexString, 16);
+                char c = (char) (value & 0xFF);
+                output = Character.isISOControl(c) ? null : Character.toString(c);
+            } catch (Exception e) {
+                LLogger.error("unexpected", e);
+                output = null;
+            }
+        }
+        else {
+            output = token_str;
+        }
+        LLogger.debug("output |" + output + "|");
+    }
+
+    private static final Pattern RAW_BYTE_TOKEN_PATTERN = Pattern.compile("<0x([\\da-fA-F]*)>");
 
     public String bpe_decode(int token, int next) {
         // following BOS token (1), sentencepiece decoder strips any leading whitespace (see PR #89)
