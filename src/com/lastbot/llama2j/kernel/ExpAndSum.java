@@ -47,6 +47,7 @@ public class ExpAndSum extends Kernel {
         cuda.synchronizeKernel(0);
         cuda.copyFromDeviceToHost(pSum, sum);
         cuda.copyFromDeviceToHost(px, x);
+        cuda.synchronizeTransfer();
         cuda.free(pSum);
         cuda.free(px);
         cuda.free(pMaxValue);
@@ -84,13 +85,13 @@ public class ExpAndSum extends Kernel {
                     kernelParameters, null // Kernel- and extra parameters
             );
         } else if (size <= LARGE_KERNEL) {
-            int threadsPerBlock = 1024;
+            int threadsPerBlock = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
             Pointer blockSum = cuda.allocate((long) blocksPerGrid * Float.BYTES);
             // exp and sum
             {
                 int sharedMemory = threadsPerBlock * Float.BYTES;
-                int blockSizeX = 1024;
+                int blockSizeX = threadsPerBlock;
                 int gridSizeX = blocksPerGrid;
 
 //            __global__ void expAndSum(float* blockSum, float* x, float* maxValue, int index, int size) {
@@ -111,8 +112,8 @@ public class ExpAndSum extends Kernel {
 //            cuda.synchronizeKernel(kernelStreamId);
             // reduction
             {
-                int blockSizeX = findNextPowerOf2(blocksPerGrid);
-                int gridSizeX = 1;
+                int blockSizeX = Math.min(findNextPowerOf2(blocksPerGrid), MAX_THREADS_PER_BLOCK);
+                int gridSizeX = (int) Math.ceil((double) blocksPerGrid / blockSizeX);
                 int sharedMemory = blockSizeX * Float.BYTES;
 
 //                __global__ void sumReduction(float* sum, float* blockSum, int blocksPerGrid) {
