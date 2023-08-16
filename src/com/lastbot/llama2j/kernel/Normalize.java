@@ -33,6 +33,7 @@ public class Normalize extends Kernel {
         call(0, px, pDivider, index, size);
         cuda.synchronizeKernel(0);
         cuda.copyFromDeviceToHost(px, x);
+        cuda.synchronizeTransfer();
         cuda.free(px);
         cuda.free(pDivider);
 
@@ -50,7 +51,7 @@ public class Normalize extends Kernel {
                 Pointer.to(new int[]{size})
         );
 
-        int blockSizeX = 256;
+        int blockSizeX = MAX_THREADS_PER_BLOCK;
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
         cuLaunchKernel(kernel,
