@@ -1,6 +1,7 @@
 package com.lastbot.llama2j;
 
 import com.lastbot.llama2j.kernel.*;
+import jcuda.CudaException;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUstream;
@@ -25,6 +26,7 @@ public class ContextCUDA implements Closeable {
     // optimized kernels for transformer
     public final Accum accum;
     public final ApplyRope applyRope;
+    public final AttentionScore attentionScore;
     public final ExpAndSum expAndSum;
     public final FindMax findMax;
     public final SumOfSquares sumOfSquares;
@@ -69,6 +71,7 @@ public class ContextCUDA implements Closeable {
 
         this.accum = new Accum(this);
         this.applyRope = new ApplyRope(this);
+        this.attentionScore = new AttentionScore(this);
         this.expAndSum = new ExpAndSum(this);
         this.findMax = new FindMax(this);
         this.sumOfSquares = new SumOfSquares(this);
@@ -212,8 +215,14 @@ public class ContextCUDA implements Closeable {
 
     public void synchronizeKernel(int k) {
         setDevice();
-        if (isError(cudaStreamSynchronize(kernelStreams[k]))) {
-            throw new RuntimeException("synchronizeKernel " + k + " failed");
+        try {
+            if (isError(cudaStreamSynchronize(kernelStreams[k]))) {
+                LLogger.error(">>> synchronizeKernel isError");
+                throw new RuntimeException("synchronizeKernel " + k + " failed");
+            }
+        }
+        catch (CudaException e) {
+            LLogger.error(">>> synchronizeKernel CudaException", e);
         }
     }
 
