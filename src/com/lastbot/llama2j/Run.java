@@ -54,19 +54,12 @@ public class Run {
 //        normalize(sum, x, index, size);
 //    }
 
-    private static final int THREAD_COUNT = 32;
-
-    private static final BlockingQueue<Runnable> queue = new ArrayBlockingQueue<>(THREAD_COUNT, false);
-
-    private static final RejectedExecutionHandler handler = new ThreadPoolExecutor.CallerRunsPolicy();
-    private static final ExecutorService executor =
-            new ThreadPoolExecutor(THREAD_COUNT, THREAD_COUNT, 5L, TimeUnit.MINUTES, queue, handler);
+    private static final int THREAD_COUNT = 64;
 
     /**
      * This function is left here as a special case to make the testing with CPU only faster, as 99% of
      * CPU time is spent here.
      */
-
     private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
         matmulParallel(xout, x, w, weightIndex, n, d);
     }
@@ -79,7 +72,7 @@ public class Run {
             final int end = Math.min(d, (threadId + 1) * sizePerThread);
 //            LLogger.debug(">>> d " + d + ", n " + n);
             int finalThreadId = threadId;
-            executor.execute(() -> {
+            Thread.ofVirtual().start(() -> {
                 try {
                     float val;
                     int weightPos;
@@ -107,7 +100,8 @@ public class Run {
         boolean cpu = context.cpu != null;
         boolean cuda = context.cudas != null && context.cudas.length > 0;
         if (cpu) {
-            transformerCPU(token, pos, p, s, w, context);
+//            transformerCPU(token, pos, p, s, w, context);
+            transformerTest(token, pos, p, s, w, context);
         }
 //        if (cuda) {
 //            transformerCUDA(token, pos, p, s, w, context);
@@ -266,6 +260,161 @@ public class Run {
 
         // classifier into logits
         matmul(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+    }
+
+
+    private static void transformerTest(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
+        // a few convenience variables
+        final int dim = p.dim;
+        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
+        int kv_mul = p.n_heads / p.n_kv_heads; // integer multiplier of the kv sharing in multiquery
+
+        final int hidden_dim = p.hidden_dim;
+        final int head_size = dim / p.n_heads;
+
+        int cudaIndex = 0;
+        ContextCUDA cuda = context.cudas[cudaIndex];
+
+        // copy the token embedding into x
+        System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
+
+        // pluck out the "pos" row of freq_cis_real and freq_cis_imag
+        int freq_cis_imag_row = pos * head_size / 2;
+
+        float[] ss = new float[1];
+
+        // forward all the layers
+        for (int l = 0; l < p.n_layers; l++) {
+            // hand over to the next device
+            if (l > context.layerAllocation.lastLayer[cudaIndex]) {
+                cudaIndex++;
+                ContextCUDA newCuda = context.cudas[cudaIndex];
+                cuda = newCuda;
+            }
+
+            // attention rmsnorm
+//            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
+            ss[0] = 0;
+            cuda.sumOfSquares.test(ss, s.x, dim);
+            cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_att_weight, l * dim, ss, dim);
+
+            // zzz matmul( -> cuda.matMul.test(
+
+            // qkv matmuls for this position
+            cuda.matMul.test(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
+            cuda.matMul.test(s.k, s.xb, w.l_wk, l * dim * kv_dim, dim, kv_dim);
+            cuda.matMul.test(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
+
+            // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
+            cuda.applyRope.test(s.q, s.k, w.freq_cis_real, w.freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
+
+            // save key,value at this time step (pos) to our kv cache
+            int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
+
+//            float* key_cache_row = s->key_cache + loff + pos * kv_dim;
+//            memcpy(key_cache_row, s->k, kv_dim * sizeof(*key_cache_row));
+            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
+
+//            float* value_cache_row = s->value_cache + loff + pos * kv_dim;
+//            memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
+            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
+
+            // multihead attention. iterate over all heads
+            int h;
+            for (h = 0; h < p.n_heads; h++) {
+                // get the query vector for this head
+//                float*q = s -> q + h * head_size;
+                int queryIndex = h * head_size;
+                // attention scores for this head
+                int attentionIndex = h * p.seq_len;
+//                float*att = s -> att + h * p.seq_len;
+                // iterate over all timesteps, including the current one
+                for (int t = 0; t <= pos; t++) {
+                    // get the key vector for this head and at this timestep
+//                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+                    int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
+                    // calculate the attention score as the dot product of q and k
+                    float score = 0.0f;
+                    for (int i = 0; i < head_size; i++) {
+                        score += s.q[queryIndex + i] * s.l_key_cache[keyIndex + i];
+                    }
+                    score /= (float) Math.sqrt(head_size);
+                    // save the score to the attention buffer
+                    s.att[attentionIndex + t] = score;
+                }
+
+                // softmax the scores to get attention weights, from 0..pos inclusively
+//                softmax(s.att, attentionIndex, pos + 1);
+
+                // find max value (for numerical stability)
+                float[] max = {0f};
+                cuda.findMax.test(max, s.att, attentionIndex, pos + 1);
+
+                // exp and sum
+                float[] sum = {0f};
+                cuda.expAndSum.test(sum, s.att, max, attentionIndex, pos + 1);
+
+                // normalize
+                cuda.normalize.test(s.att, sum, attentionIndex, pos + 1);
+
+                // weighted sum of the values, store back into xb
+                int xbIndex = h * head_size;
+                Arrays.fill(s.xb, xbIndex, xbIndex + head_size, 0f);
+
+                for (int t = 0; t <= pos; t++) {
+                    // get the value vector for this head and at this timestep
+                    int vIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
+                    // get the attention weight for this timestep
+                    float a = s.att[attentionIndex + t];
+                    // accumulate the weighted value into xb
+                    for (int i = 0; i < head_size; i++) {
+                        s.xb[xbIndex + i] += a * s.l_value_cache[vIndex + i];
+                    }
+                }
+            }
+
+            // final matmul to get the output of the attention
+            cuda.matMul.test(s.xb2, s.xb, w.l_wo, l * dim * dim, dim, dim);
+            // residual connection back into x
+            cuda.accum.test(s.x, s.xb2, dim);
+
+            // ffn rmsnorm
+//            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
+
+            ss[0] = 0f;
+            cuda.sumOfSquares.test(ss, s.x, dim);
+            cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_ffn_weight, l * dim, ss, dim);
+
+            // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+            // first calculate self.w1(x) and self.w3(x)
+            cuda.matMul.test(s.hb, s.xb, w.l_w1, l * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.test(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
+
+            // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
+            for (int i = 0; i < hidden_dim; i++) {
+                s.hb[i] = s.hb[i] * (float) (1.0f / (1.0f + Math.exp((-s.hb[i]))));
+            }
+
+            // elementwise multiply with w3(x)
+            for (int i = 0; i < hidden_dim; i++) {
+                s.hb[i] = s.hb[i] * s.hb2[i];
+            }
+
+            // final matmul to get the output of the ffn
+            cuda.matMul.test(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
+
+            // residual connection
+            cuda.accum.test(s.x, s.xb, dim);
+        } // layers
+
+        // final rmsnorm
+//        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
+        ss[0] = 0f;
+        cuda.sumOfSquares.test(ss, s.x, dim);
+        cuda.weightNormalizeAndScale.test(s.x, s.x, w.rms_final_weight, 0, ss, dim);
+
+        // classifier into logits
+        cuda.matMul.test(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
     }
 
     private static void transformerCUDA(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
@@ -570,14 +719,14 @@ public class Run {
 
                     // find max value (for numerical stability)
                     float[] max = {0f};
-                    FindMax.call(max, state.logits, 0, config.vocab_size);
+                    context.lastCuda().findMax.test(max, state.logits, 0, config.vocab_size);
 
                     // exp and sum
                     float[] sum = {0f};
-                    ExpAndSum.call(sum, state.logits, max, 0, config.vocab_size);
+                    context.lastCuda().expAndSum.test(sum, state.logits, max, 0, config.vocab_size);
 
                     // normalize
-                    Normalize.call(state.logits, sum, 0, config.vocab_size);
+                    context.lastCuda().normalize.test(state.logits, sum, 0, config.vocab_size);
 
                     if (commandLine.getTopp() == null) {
                         // we sample from this distribution to get the next token
@@ -612,8 +761,6 @@ public class Run {
         long end = time();
 
         // cleanup, free memory
-
-        executor.shutdown();
 
         state.close();
 
