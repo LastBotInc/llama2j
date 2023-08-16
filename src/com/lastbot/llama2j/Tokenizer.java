@@ -213,7 +213,7 @@ public class Tokenizer implements Closeable {
             try {
                 int value = Integer.parseInt(hexString, 16);
                 char c = (char) (value & 0xFF);
-                return Character.isISOControl(c) ? null : Character.toString(c);
+                return c != '\n' && Character.isISOControl(c) ? null : Character.toString(c);
             } catch (Exception e) {
                 return null;
             }
