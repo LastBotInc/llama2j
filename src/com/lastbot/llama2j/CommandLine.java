@@ -13,13 +13,15 @@ public class CommandLine {
     private static final String STEPS = "--steps";
     private static final String GPU = "--gpuMem";
     private static final String PROMPT = "--prompt";
+    private static final String TOKENIZER = "--tokenizer";
 
-    private String checkpoint;
+    private final String checkpoint;
     private float temperature = 0.9f; // e.g. 1.0, or 0.0
-    private Float topp = null; // e.g. 1.0, or 0.0
+    private Float topp = 0.9f; // e.g. 1.0, or 0.0
     private Long seed = null; // e.g. 12345
     private int steps = 256;          // max number of steps to run for, 0: use seq_len
     private String prompt = "One day, Lily met a Shoggoth";      // prompt string
+    private String tokenizer = "tokenizer.bin";      // tokenizer file
 
     private long GIGA = 1024L * 1024L * 1024L;
 
@@ -51,7 +53,7 @@ public class CommandLine {
                 topp = Float.parseFloat(arguments.get(TOPP));
                 LLogger.info(TOPP + " " + topp);
             } else {
-                LLogger.info(TOPP + " " + topp + " (using default, sample from predicted distribution)");
+                LLogger.info(TOPP + " " + topp + " (using default)");
             }
 
             if (arguments.containsKey(SEED)) {
@@ -73,6 +75,13 @@ public class CommandLine {
                 LLogger.info(PROMPT + " " + prompt);
             } else {
                 LLogger.info(PROMPT + " " + prompt + " (using default)");
+            }
+
+            if (arguments.containsKey(TOKENIZER)) {
+                tokenizer = arguments.get(TOKENIZER);
+                LLogger.info(TOKENIZER + " " + tokenizer);
+            } else {
+                LLogger.info(TOKENIZER + " " + tokenizer + " (using default)");
             }
 
             if (arguments.containsKey(GPU)) {
@@ -126,6 +135,10 @@ public class CommandLine {
         return prompt;
     }
 
+    public String getTokenizer() {
+        return tokenizer;
+    }
+
     public long[] getGpuMem() {
         return gpuMem;
     }
@@ -138,6 +151,7 @@ public class CommandLine {
                 SEED + " <seed> e.g. 12345 random seed, default is current time\n" +
                 STEPS + " <steps> e.g. 256\n" +
                 GPU + " <gpu memory allocation per device> e.g. 17,24,24,24\n" +
-                PROMPT + " <prompt> e.g. \"One day, Lily met a Shoggoth\"\n");
+                PROMPT + " <prompt> e.g. \"One day, Lily met a Shoggoth\"\n" +
+                TOKENIZER + " <tokenizer> e.g. mytokenizer.bin \n");
     }
 }
