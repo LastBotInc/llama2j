@@ -1,6 +1,7 @@
 package com.lastbot.llama2j;
 
 import jcuda.Pointer;
+import jcuda.Sizeof;
 
 import java.io.Closeable;
 
@@ -35,6 +36,9 @@ public class RunState implements Closeable {
     float[] v; // value (dim,)
     float[] att; // buffer for scores/attention values (n_heads, seq_len)
     float[] logits; // output logits
+    float[] tmp1;
+    float[] tmp2;
+    float[] tmp3;
 
     // kv cache
     float[] l_key_cache;   // (layer, seq_len, dim)
@@ -54,6 +58,9 @@ public class RunState implements Closeable {
     Pointer[] logitsCU;
     Pointer[] l_key_cacheCU;
     Pointer[] l_value_cacheCU;
+    Pointer[] tmp1CU;
+    Pointer[] tmp2CU;
+    Pointer[] tmp3CU;
 
     public static long bytesStatic(Config p) {
         int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
@@ -67,7 +74,10 @@ public class RunState implements Closeable {
                         ((long) kv_dim) +
                         ((long) kv_dim) +
                         ((long) p.n_heads * p.seq_len) +
-                        ((long) p.vocab_size)
+                        ((long) p.vocab_size) +
+                        ((long) 1) +
+                        ((long) 1) +
+                        ((long) 1)
                 // omit probIndex, as it is currently only CPU
         );
     }
@@ -96,6 +106,9 @@ public class RunState implements Closeable {
         v = c.cpu.allocateFloatArray(kv_dim);
         att = c.cpu.allocateFloatArray((long) p.n_heads * p.seq_len);
         logits = c.cpu.allocateFloatArray(p.vocab_size);
+        tmp1 = c.cpu.allocateFloatArray(1);
+        tmp2 = c.cpu.allocateFloatArray(1);
+        tmp3 = c.cpu.allocateFloatArray(1);
 
         probIndex = new ProbIndex[p.vocab_size];
         for (int i = 0; i < p.vocab_size; i++) {
@@ -123,6 +136,9 @@ public class RunState implements Closeable {
             logitsCU = new Pointer[n];
             l_key_cacheCU = new Pointer[n];
             l_value_cacheCU = new Pointer[n];
+            tmp1CU = new Pointer[n];
+            tmp2CU = new Pointer[n];
+            tmp3CU = new Pointer[n];
 
             for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = c.cudas[dev];
@@ -145,6 +161,10 @@ public class RunState implements Closeable {
 
                 l_key_cacheCU[dev] = cu.allocateFloatArray(lengthOfLayerData, true);
                 l_value_cacheCU[dev] = cu.allocateFloatArray(lengthOfLayerData, true);
+
+                tmp1CU[dev] = cu.allocateFloatArray(1, true);
+                tmp2CU[dev] = cu.allocateFloatArray(1, true);
+                tmp3CU[dev] = cu.allocateFloatArray(1, true);
 
 //                l_key_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
 //                l_value_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
