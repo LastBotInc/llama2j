@@ -12,8 +12,7 @@ See file upstream.txt for details on the commit that this version is synchronize
 
 */
 
-import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
-import jcuda.Sizeof;
+import com.lastbot.llama2j.kernel.*;
 
 import java.io.File;
 import java.io.IOException;
@@ -21,43 +20,12 @@ import java.util.Arrays;
 import java.util.concurrent.*;
 
 import static java.lang.Math.abs;
-import static jcuda.runtime.JCuda.cudaMemcpy;
-import static jcuda.runtime.cudaMemcpyKind.cudaMemcpyDeviceToDevice;
 
 public class Run {
     private static final boolean USE_CPU = true;
     private static final boolean USE_CUDA = true;
 
     private static final String MODELS_DIRECTORY = "models";
-    private static final String TOKENIZER_FILE = "tokenizer.bin";
-
-    private static XoRoShiRo128PlusRandom random;
-
-    /**
-     * initialization: read from checkpoint
-     *
-     * @param w
-     * @param p
-     * @param sharedWeights
-     */
-    private static void checkPointInitWeights(BinFileReader reader, TransformerWeights w, Config p, boolean sharedWeights) {
-        w.token_embedding_table = reader.nextFloatArray(p.vocab_size * p.dim);
-        w.l_rms_att_weight = reader.nextFloatArray(p.n_layers * p.dim);
-        w.l_wq = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-        w.l_wk = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-        w.l_wv = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-        w.l_wo = reader.nextFloatArray(p.n_layers * p.dim * p.dim);
-        w.l_rms_ffn_weight = reader.nextFloatArray(p.n_layers * p.dim);
-        w.l_w1 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
-        w.l_w2 = reader.nextFloatArray(p.n_layers * p.hidden_dim * p.dim);
-        w.l_w3 = reader.nextFloatArray(p.n_layers * p.dim * p.hidden_dim);
-        w.rms_final_weight = reader.nextFloatArray(p.dim);
-        int head_size = p.dim / p.n_heads;
-        w.freq_cis_real = reader.nextFloatArray(p.seq_len * head_size / 2);
-        w.freq_cis_imag = reader.nextFloatArray(p.seq_len * head_size / 2);
-
-        w.wcls = sharedWeights ? w.token_embedding_table : reader.nextFloatArray(p.vocab_size * p.dim);
-    }
 
 // ----------------------------------------------------------------------------
 // The below commented-out functions show how to implement rmsnorm() or softmax()
@@ -95,13 +63,13 @@ public class Run {
             new ThreadPoolExecutor(THREAD_COUNT, THREAD_COUNT, 5L, TimeUnit.MINUTES, queue, handler);
 
     /**
-     *  This function is left here as a special case to make the testing with CPU only faster, as 99% of
-     *  CPU time is spent here.
+     * This function is left here as a special case to make the testing with CPU only faster, as 99% of
+     * CPU time is spent here.
      */
 
-//    private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
-//        matmulParallel(xout, x, w, weightIndex, n, d);
-//    }
+    private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
+        matmulParallel(xout, x, w, weightIndex, n, d);
+    }
 
     private static void matmulParallel(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
         int sizePerThread = d / THREAD_COUNT;
@@ -149,6 +117,9 @@ public class Run {
     private static void transformerCPU(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
         // a few convenience variables
         final int dim = p.dim;
+        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
+        int kv_mul = p.n_heads / p.n_kv_heads; // integer multiplier of the kv sharing in multiquery
+
         final int hidden_dim = p.hidden_dim;
         final int head_size = dim / p.n_heads;
 
@@ -161,54 +132,43 @@ public class Run {
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         int freq_cis_imag_row = pos * head_size / 2;
 
-        float[] ss = {0f};
+        float[] ss = new float[1];
 
         // forward all the layers
-        for (int layer = 0; layer < p.n_layers; layer++) {
+        for (int l = 0; l < p.n_layers; l++) {
             // hand over to the next device
-            if (layer > context.layerAllocation.lastLayer[cudaIndex]) {
+            if (l > context.layerAllocation.lastLayer[cudaIndex]) {
                 cudaIndex++;
                 ContextCUDA newCuda = context.cudas[cudaIndex];
-                // zzz copy state from cuda to newCuda
                 cuda = newCuda;
             }
 
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            cuda.sumOfSquares.test(ss, s.x, dim);
-            cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_att_weight, layer * dim, ss, dim);
+            ss[0] = 0;
+            SumOfSquares.call(ss, s.x, dim);
+            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_att_weight, l * dim, ss, dim);
+
+            // zzz matmul( -> cuda.matMul.test(
 
             // qkv matmuls for this position
-            cuda.matMul.test(s.q, s.xb, w.l_wq, layer * dim * dim, dim, dim);
-            cuda.matMul.test(s.k, s.xb, w.l_wk, layer * dim * dim, dim, dim);
-            cuda.matMul.test(s.v, s.xb, w.l_wv, layer * dim * dim, dim, dim);
+            matmul(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
+            matmul(s.k, s.xb, w.l_wk, l * dim * kv_dim, dim, kv_dim);
+            matmul(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
-            for (int i = 0; i < dim; i += 2) {
-                float q0 = s.q[i];
-                float q1 = s.q[i + 1];
-                float k0 = s.k[i];
-                float k1 = s.k[i + 1];
-                int freq_cis_imag_index = freq_cis_imag_row + (i % head_size) / 2;
-                float fcr = w.freq_cis_real[freq_cis_imag_index];
-                float fci = w.freq_cis_imag[freq_cis_imag_index];
-                s.q[i] = q0 * fcr - q1 * fci;
-                s.q[i + 1] = q0 * fci + q1 * fcr;
-                s.k[i] = k0 * fcr - k1 * fci;
-                s.k[i + 1] = k0 * fci + k1 * fcr;
-            }
+            ApplyRope.call(s.q, s.k, w.freq_cis_real, w.freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
 
             // save key,value at this time step (pos) to our kv cache
-            int loff = layer * p.seq_len * dim; // kv cache layer offset for convenience
-//            float*key_cache_row = s.key_cache + loff + pos * dim;
-//            memcpy(key_cache_row, s -> k, dim * sizeof( * key_cache_row));
+            int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
 
-            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * dim, dim);
+//            float* key_cache_row = s->key_cache + loff + pos * kv_dim;
+//            memcpy(key_cache_row, s->k, kv_dim * sizeof(*key_cache_row));
+            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
 
-//            float*value_cache_row = s.value_cache + loff + pos * dim;
-//            memcpy(value_cache_row, s -> v, dim * sizeof( * value_cache_row));
-
-            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * dim, dim);
+//            float* value_cache_row = s->value_cache + loff + pos * kv_dim;
+//            memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
+            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
 
             // multihead attention. iterate over all heads
             int h;
@@ -222,8 +182,8 @@ public class Run {
                 // iterate over all timesteps, including the current one
                 for (int t = 0; t <= pos; t++) {
                     // get the key vector for this head and at this timestep
-//                    float*k = s -> key_cache + loff + t * dim + h * head_size;
-                    int keyIndex = loff + t * dim + h * head_size;
+//                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+                    int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
                     // calculate the attention score as the dot product of q and k
                     float score = 0.0f;
                     for (int i = 0; i < head_size; i++) {
@@ -239,26 +199,22 @@ public class Run {
 
                 // find max value (for numerical stability)
                 float[] max = {0f};
-                cuda.findMax.test(max, s.att, attentionIndex, pos + 1);
+                FindMax.call(max, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
                 float[] sum = {0f};
-                cuda.expAndSum.test(sum, s.att, max, attentionIndex, pos + 1);
+                ExpAndSum.call(sum, s.att, max, attentionIndex, pos + 1);
 
                 // normalize
-                cuda.normalize.test(s.att, sum, attentionIndex, pos + 1);
+                Normalize.call(s.att, sum, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
-//                float*xb = s -> xb + h * head_size;
-//                memset(xb, 0, head_size * sizeof( float));
-
                 Arrays.fill(s.xb, xbIndex, xbIndex + head_size, 0f);
 
                 for (int t = 0; t <= pos; t++) {
                     // get the value vector for this head and at this timestep
-                    int vIndex = loff + t * dim + h * head_size;
-//                    float*v = s -> value_cache + loff + t * dim + h * head_size;
+                    int vIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
                     // get the attention weight for this timestep
                     float a = s.att[attentionIndex + t];
                     // accumulate the weighted value into xb
@@ -269,21 +225,21 @@ public class Run {
             }
 
             // final matmul to get the output of the attention
-            cuda.matMul.test(s.xb2, s.xb, w.l_wo, layer * dim * dim, dim, dim);
+            matmul(s.xb2, s.xb, w.l_wo, l * dim * dim, dim, dim);
             // residual connection back into x
-            cuda.accum.test(s.x, s.xb2, dim);
+            Accum.call(s.x, s.xb2, dim);
 
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
             ss[0] = 0f;
-            cuda.sumOfSquares.test(ss, s.x, dim);
-            cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, ss, dim);
+            SumOfSquares.call(ss, s.x, dim);
+            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_ffn_weight, l * dim, ss, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            cuda.matMul.test(s.hb, s.xb, w.l_w1, layer * dim * hidden_dim, dim, hidden_dim);
-            cuda.matMul.test(s.hb2, s.xb, w.l_w3, layer * dim * hidden_dim, dim, hidden_dim);
+            matmul(s.hb, s.xb, w.l_w1, l * dim * hidden_dim, dim, hidden_dim);
+            matmul(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
 
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
             for (int i = 0; i < hidden_dim; i++) {
@@ -296,124 +252,218 @@ public class Run {
             }
 
             // final matmul to get the output of the ffn
-            cuda.matMul.test(s.xb, s.hb, w.l_w2, layer * dim * hidden_dim, hidden_dim, dim);
+            matmul(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
 
             // residual connection
-            cuda.accum.test(s.x, s.xb, dim);
+            Accum.call(s.x, s.xb, dim);
         } // layers
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
         ss[0] = 0f;
-        cuda.sumOfSquares.test(ss, s.x, dim);
-        cuda.weightNormalizeAndScale.test(s.x, s.x, w.rms_final_weight, 0, ss, dim);
+        SumOfSquares.call(ss, s.x, dim);
+        WeightNormalizeAndScale.call(s.x, s.x, w.rms_final_weight, 0, ss, dim);
 
         // classifier into logits
-        cuda.matMul.test(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+        matmul(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
     }
 
     private static void transformerCUDA(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
-        // a few convenience variables
-        int dim = p.dim;
-        int hidden_dim = p.hidden_dim;
-        int head_size = dim / p.n_heads;
-
-        // copy the token embedding into x
-//        float*content_row = &(w.token_embedding_table[token * dim]);
-//        memcpy(x, content_row, dim * sizeof( * x));
-//        System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
-        cudaMemcpy(s.xCU, w.token_embedding_tableCU.withByteOffset((long) token * dim * Sizeof.FLOAT),
-                dim, cudaMemcpyDeviceToDevice);
-
-
+//        // a few convenience variables
+//        final int dim = p.dim;
+//        final int hidden_dim = p.hidden_dim;
+//        final int head_size = dim / p.n_heads;
+//
+//        int cudaIndex = 0;
+//        ContextCUDA cuda = context.cudas[cudaIndex];
+//        cuda.setDevice();
+//
+//        Pointer xCU = s.xCU[cudaIndex];
+//        Pointer xbCU = s.xbCU[cudaIndex];
+//        Pointer xb2CU = s.xb2CU[cudaIndex];
+//        Pointer hbCU = s.hbCU[cudaIndex];
+//        Pointer hb2CU = s.hb2CU[cudaIndex];
+//        Pointer qCU = s.qCU[cudaIndex];
+//        Pointer kCU = s.kCU[cudaIndex];
+//        Pointer vCU = s.vCU[cudaIndex];
+//        Pointer attCU = s.attCU[cudaIndex];
+//        Pointer logitsCU = s.logitsCU[cudaIndex];
+//
+//        // copy the token embedding into x
+//        cudaMemcpy(xCU, w.token_embedding_tableCU.withByteOffset((long) token * dim * Sizeof.FLOAT),
+//                dim, cudaMemcpyDeviceToDevice);
+//
+//        // pluck out the "pos" row of freq_cis_real and freq_cis_imag
+//        int freq_cis_imag_row = pos * head_size / 2;
+//
+//        Pointer ssCU = cuda.allocateAndCopyToDevice(new float[]{0f}, false);
+//
+//        // forward all layers
+//        for (int layer = 0; layer < p.n_layers; layer++) {
+//            // hand RunState over to the next device
+//            // todo zzz check which arrays are actually needed, this version copies all except layer dependent
+//            if (layer > context.layerAllocation.lastLayer[cudaIndex]) {
+//                cudaIndex++;
+//                ContextCUDA newCuda = context.cudas[cudaIndex];
+//
+//                cuda.copyFromDeviceToAnotherDevice(xCU, s.xCU[cudaIndex], newCuda, s.x);
+//                cuda.copyFromDeviceToAnotherDevice(xbCU, s.xbCU[cudaIndex], newCuda, s.xb);
+//                cuda.copyFromDeviceToAnotherDevice(xb2CU, s.xb2CU[cudaIndex], newCuda, s.xb2);
+//                cuda.copyFromDeviceToAnotherDevice(hbCU, s.hbCU[cudaIndex], newCuda, s.hb);
+//                cuda.copyFromDeviceToAnotherDevice(hb2CU, s.hb2CU[cudaIndex], newCuda, s.hb2);
+//                cuda.copyFromDeviceToAnotherDevice(qCU, s.qCU[cudaIndex], newCuda, s.q);
+//                cuda.copyFromDeviceToAnotherDevice(kCU, s.kCU[cudaIndex], newCuda, s.k);
+//                cuda.copyFromDeviceToAnotherDevice(vCU, s.vCU[cudaIndex], newCuda, s.v);
+//                cuda.copyFromDeviceToAnotherDevice(attCU, s.attCU[cudaIndex], newCuda, s.att);
+//                cuda.copyFromDeviceToAnotherDevice(logitsCU, s.logitsCU[cudaIndex], newCuda, s.logits);
+//
+//                // todo zzz copy to CPU in case no more devices, and exit signaling transfer to CPU transformer
+//
+//                newCuda.synchronizeTransfer();
+//
+//                cuda = newCuda;
+//            }
+//
+//            // attention rmsnorm
+////            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
+//            cuda.sumOfSquares.call(0, ssCU, xCU, dim);
+//            cuda.weightNormalizeAndScale.call(
+//                    0, xbCU, xCU, w.l_rms_att_weightCU, layer * dim, ssCU, dim);
+//
+//            // qkv matmuls for this position
+//            cuda.matMul.call(0, qCU, xbCU, w.l_wqCU, layer * dim * dim, dim, dim);
+//            cuda.matMul.call(0, kCU, xbCU, w.l_wkCU, layer * dim * dim, dim, dim);
+//            cuda.matMul.call(0, vCU, xbCU, w.l_wvCU, layer * dim * dim, dim, dim);
+//
+//            // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
+//            for (int i = 0; i < dim; i += 2) {
+//                float q0 = s.q[i];
+//                float q1 = s.q[i + 1];
+//                float k0 = s.k[i];
+//                float k1 = s.k[i + 1];
+//                int freq_cis_imag_index = freq_cis_imag_row + (i % head_size) / 2;
+//                float fcr = w.freq_cis_real[freq_cis_imag_index];
+//                float fci = w.freq_cis_imag[freq_cis_imag_index];
+//                s.q[i] = q0 * fcr - q1 * fci;
+//                s.q[i + 1] = q0 * fci + q1 * fcr;
+//                s.k[i] = k0 * fcr - k1 * fci;
+//                s.k[i + 1] = k0 * fci + k1 * fcr;
+//            }
+//
+//            // save key,value at this time step (pos) to our kv cache
+//            int loff = layer * p.seq_len * dim; // kv cache layer offset for convenience
+////            float*key_cache_row = s.key_cache + loff + pos * dim;
+////            memcpy(key_cache_row, s -> k, dim * sizeof( * key_cache_row));
+//
+//            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * dim, dim);
+//
+////            float*value_cache_row = s.value_cache + loff + pos * dim;
+////            memcpy(value_cache_row, s -> v, dim * sizeof( * value_cache_row));
+//
+//            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * dim, dim);
+//
+//            // multihead attention. iterate over all heads
+//            int h;
+//            for (h = 0; h < p.n_heads; h++) {
+//                // get the query vector for this head
+////                float*q = s -> q + h * head_size;
+//                int queryIndex = h * head_size;
+//                // attention scores for this head
+//                int attentionIndex = h * p.seq_len;
+////                float*att = s -> att + h * p.seq_len;
+//                // iterate over all timesteps, including the current one
+//                for (int t = 0; t <= pos; t++) {
+//                    // get the key vector for this head and at this timestep
+////                    float*k = s -> key_cache + loff + t * dim + h * head_size;
+//                    int keyIndex = loff + t * dim + h * head_size;
+//                    // calculate the attention score as the dot product of q and k
+//                    float score = 0.0f;
+//                    for (int i = 0; i < head_size; i++) {
+//                        score += s.q[queryIndex + i] * s.l_key_cache[keyIndex + i];
+//                    }
+//                    score /= (float) Math.sqrt(head_size);
+//                    // save the score to the attention buffer
+//                    s.att[attentionIndex + t] = score;
+//                }
+//
+//                // softmax the scores to get attention weights, from 0..pos inclusively
+////                softmax(s.att, attentionIndex, pos + 1);
+//
+//                // find max value (for numerical stability)
+//                float[] max = {0f};
+//                cuda.findMax.call(max, s.att, attentionIndex, pos + 1);
+//
+//                // exp and sum
+//                float[] sum = {0f};
+//                ExpAndSum.call(sum, s.att, max, attentionIndex, pos + 1);
+//
+//                // normalize
+//                Normalize.call(s.att, sum, attentionIndex, pos + 1);
+//
+//                // weighted sum of the values, store back into xb
+//                int xbIndex = h * head_size;
+////                float*xb = s -> xb + h * head_size;
+////                memset(xb, 0, head_size * sizeof( float));
+//
+//                Arrays.fill(s.xb, xbIndex, xbIndex + head_size, 0f);
+//
+//                for (int t = 0; t <= pos; t++) {
+//                    // get the value vector for this head and at this timestep
+//                    int vIndex = loff + t * dim + h * head_size;
+////                    float*v = s -> value_cache + loff + t * dim + h * head_size;
+//                    // get the attention weight for this timestep
+//                    float a = s.att[attentionIndex + t];
+//                    // accumulate the weighted value into xb
+//                    for (int i = 0; i < head_size; i++) {
+//                        s.xb[xbIndex + i] += a * s.l_value_cache[vIndex + i];
+//                    }
+//                }
+//            }
+//
+//            // final matmul to get the output of the attention
+//            matmul(s.xb2, s.xb, w.l_wo, layer * dim * dim, dim, dim);
+//            // residual connection back into x
+//            Accum.call(s.x, s.xb2, dim);
+//
+//            // ffn rmsnorm
+////            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
+//
+//            SumOfSquares.call(ssCU, s.x, dim);
+//            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, ss, dim);
+//
+//            // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
+//            // first calculate self.w1(x) and self.w3(x)
+//            matmul(s.hb, s.xb, w.l_w1, layer * dim * hidden_dim, dim, hidden_dim);
+//            matmul(s.hb2, s.xb, w.l_w3, layer * dim * hidden_dim, dim, hidden_dim);
+//
+//            // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
+//            for (int i = 0; i < hidden_dim; i++) {
+//                s.hb[i] = s.hb[i] * (float) (1.0f / (1.0f + Math.exp((-s.hb[i]))));
+//            }
+//
+//            // elementwise multiply with w3(x)
+//            for (int i = 0; i < hidden_dim; i++) {
+//                s.hb[i] = s.hb[i] * s.hb2[i];
+//            }
+//
+//            // final matmul to get the output of the ffn
+//            matmul(s.xb, s.hb, w.l_w2, layer * dim * hidden_dim, hidden_dim, dim);
+//
+//            // residual connection
+//            Accum.call(s.x, s.xb, dim);
+//        } // layers
+//
+//        // final rmsnorm
+////        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
+//        ss[0] = 0f;
+//        SumOfSquares.call(ss, s.x, dim);
+//        WeightNormalizeAndScale.call(s.x, s.x, w.rms_final_weight, 0, ss, dim);
+//
+//        // classifier into logits
+//        matmul(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
     }
 
 // ----------------------------------------------------------------------------
-// byte pair encoding (BPE) tokenizer, encodes strings into tokens so we can prompt
-
-    private static int str_lookup(char c1, String[] vocab) {
-        // find the first perfect match for str in vocab, return its index or -1 if not found
-        for (int i = 0; i < vocab.length; i++) {
-            if (vocab[i].length() == 1 && vocab[i].charAt(0) == c1) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    private static int str_lookup(String str, String[] vocab) {
-        // find the first perfect match for str in vocab, return its index or -1 if not found
-        for (int i = 0; i < vocab.length; i++) {
-            if (vocab[i].equals(str)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * @param str
-     * @param vocab
-     * @param vocab_scores
-     * @param max_token_length
-     * @param tokens
-     * @return number of tokens
-     */
-    private static int bpe_encode(String str, String[] vocab, float[] vocab_scores, int max_token_length, int[] tokens) {
-
-        // first encode every individual byte in the input string
-
-        int n_tokens = 0; // the number of tokens
-
-        // a temporary buffer to merge two consecutive tokens
-
-        char[] characters = str.toCharArray();
-//        char[] str_buffer = new char[max_token_length * 2 + 1]; // *2 for concat, +1 for null terminator
-//        System.arraycopy(characters, 0, str_buffer, 0, str.length());
-
-        for (int i = 0; i < str.length(); i++) {
-            int id = str_lookup(characters[i], vocab);
-            if (id == -1) {
-                LLogger.error("Unknown prompt character '" + characters[i] + "'");
-                System.exit(1);
-            }
-            tokens[n_tokens] = id;
-            n_tokens++;
-        }
-
-        // merge the best consecutive pair each iteration, according the scores in vocab_scores
-        while (true) {
-            float best_score = -1e10f;
-            int best_id = -1;
-            int best_idx = -1;
-
-            for (int i = 0; i < n_tokens - 1; i++) {
-                // check if we can merge the pair (tokens[i], tokens[i+1])
-
-                String str_buffer = vocab[tokens[i]] + vocab[tokens[i + 1]];
-                int id = str_lookup(str_buffer, vocab);
-                if (id != -1 && vocab_scores[id] > best_score) {
-                    // this merge pair exists in vocab! record its score and position
-                    best_score = vocab_scores[id];
-                    best_id = id;
-                    best_idx = i;
-                }
-            }
-
-            if (best_idx == -1) {
-                break; // we couldn't find any more pairs to merge, so we're done
-            }
-
-            // merge the consecutive pair (best_idx, best_idx+1) into new token best_id
-            tokens[best_idx] = best_id;
-            // delete token at position best_idx+1, shift the entire sequence back 1
-            for (int i = best_idx + 1; i < n_tokens - 1; i++) {
-                tokens[i] = tokens[i + 1];
-            }
-            n_tokens--;
-        }
-        return n_tokens;
-    }
 
 // ----------------------------------------------------------------------------
 // utilities
@@ -422,97 +472,23 @@ public class Run {
         return System.currentTimeMillis();
     }
 
-    private static int random_u32() {
-        // zzz do we need this?
-        return random.nextInt();
-    }
-
-    private static float random_f32() { // random float32 in [0,1)
-        return random.nextFloat();
-    }
-
 // ----------------------------------------------------------------------------
 // sampling can be done in a few ways: greedy argmax, sampling, top-p sampling
 
-    private static int sample(RunState state, int n) {
-        float[] probabilities = state.logits;
-        // sample index from probabilities, they must sum to 1
-        float r = random_f32();
-        float cdf = 0.0f;
-        for (int i = 0; i < n; i++) {
-            cdf += probabilities[i];
-            if (r < cdf) {
-                return i;
-            }
-        }
-        return n - 1; // in case of rounding errors
-    }
-
-    private static int argmax(float[] v, int n) {
-        // return argmax of v in elements 0..n
-        int max_i = 0;
-        float max_p = v[0];
-        for (int i = 1; i < n; i++) {
-            if (v[i] > max_p) {
-                max_i = i;
-                max_p = v[i];
-            }
-        }
-        return max_i;
-    }
-
-    static int sample_topp(RunState state, int n, float topp) {
-        // top-p sampling (or "nucleus sampling") samples from the smallest set of
-        // tokens that exceed probability topp. This way we never sample tokens that
-        // have very low probabilities and are less likely to go "off the rails".
-
-        float[] probabilities = state.logits;
-
-        // quicksort indices in descending order of probabilities
-        for (int i = 0; i < n; i++) {
-            state.probIndex[i].index = i;
-            state.probIndex[i].prob = probabilities[i];
-        }
-
-        Arrays.sort(state.probIndex);
-
-        // truncate the list where cumulative probability exceeds topp
-        float cumulative_prob = 0.0f;
-        int last_idx = 0;
-        for (int i = 0; i < n; i++) {
-            cumulative_prob += state.probIndex[i].prob;
-            if (cumulative_prob > topp) {
-                last_idx = i;
-                break; // we've exceeded topp by including last_idx
-            }
-        }
-
-        // sample from the truncated list
-        float r = random_f32() * cumulative_prob;
-        float cdf = 0.0f;
-        for (int i = 0; i <= last_idx; i++) {
-            cdf += state.probIndex[i].prob;
-            if (r < cdf) {
-                return state.probIndex[i].index;
-            }
-        }
-        return state.probIndex[last_idx].index; // in case of rounding errors
-    }
-
     public static void main(String[] args) {
-
         CommandLine commandLine = new CommandLine(args);
 
         Long rngSeed = commandLine.getSeed();
         if (rngSeed == null) {
             rngSeed = time();
         }
-        random = new XoRoShiRo128PlusRandom(rngSeed);
 
         Target target = new Target(USE_CPU, USE_CUDA);
 
         Config config = new Config();
         TransformerWeights weights = null;
+
+        Sampler sampler = new Sampler(rngSeed);
 
         // read in the checkpoint file
         long startModelRead = time();
@@ -559,38 +535,11 @@ public class Run {
             steps = config.seq_len;
         }
 
-        // read in the tokenizer.bin file
-        String[] vocab = new String[config.vocab_size];
-        float[] vocab_scores = new float[config.vocab_size];
-
-        // read tokenizer
-
-        long startTokenizerRead = time();
-
-        int max_token_length = 0;
-        try (BinFileReader reader = new BinFileReader(MODELS_DIRECTORY + File.separator + TOKENIZER_FILE)) {
-            max_token_length = reader.nextInt();
-
-            for (int i = 0; i < config.vocab_size; i++) {
-                vocab_scores[i] = reader.nextFloat();
-                int len = reader.nextInt();
-                vocab[i] = reader.nextString(len);
-            }
-        } catch (IOException e) {
-            System.exit(1);
-        }
-
-        long endTokenizerRead = time();
-
-        LLogger.info("Read tokenizer in " + String.format("%.2f", (endTokenizerRead - startTokenizerRead) / 1000d) + " s");
+        Tokenizer tokenizer = new Tokenizer(
+                MODELS_DIRECTORY + File.separator + commandLine.getTokenizer(), config.vocab_size);
 
         // process the prompt, if any
-        int promptLength = commandLine.getPrompt() != null ? commandLine.getPrompt().length() : 0;
-        int[] prompt_tokens = new int[promptLength];
-        int num_prompt_tokens = 0;
-        if (promptLength > 0) {
-            num_prompt_tokens = bpe_encode(commandLine.getPrompt(), vocab, vocab_scores, max_token_length, prompt_tokens);
-        }
+        int[] prompt_tokens = tokenizer.bpe_encode(commandLine.getPrompt());
 
         // start the main loop
         long start = 0;  // used to time our code, only initialized after first iteration
@@ -603,14 +552,14 @@ public class Run {
             transformer(token, pos, config, state, weights, context);
 
             // advance the state machine
-            if (pos < num_prompt_tokens) {
+            if (pos < prompt_tokens.length) {
                 // if we are still processing the input prompt, force the next prompt token
                 next = prompt_tokens[pos];
             } else {
                 // sample the next token
                 if (commandLine.getTemperature() == 0.0f) {
                     // greedy argmax sampling: take the token with the highest probability
-                    next = argmax(state.logits, config.vocab_size);
+                    next = sampler.argmax(state.logits, config.vocab_size);
                 } else {
                     // apply the temperature to the logits
                     for (int q = 0; q < config.vocab_size; q++) {
@@ -621,21 +570,21 @@ public class Run {
 
                     // find max value (for numerical stability)
                     float[] max = {0f};
-                    context.lastCuda().findMax.test(max, state.logits, 0, config.vocab_size);
+                    FindMax.call(max, state.logits, 0, config.vocab_size);
 
                     // exp and sum
                     float[] sum = {0f};
-                    context.lastCuda().expAndSum.test(sum, state.logits, max, 0, config.vocab_size);
+                    ExpAndSum.call(sum, state.logits, max, 0, config.vocab_size);
 
                     // normalize
-                    context.lastCuda().normalize.test(state.logits, sum, 0, config.vocab_size);
+                    Normalize.call(state.logits, sum, 0, config.vocab_size);
 
                     if (commandLine.getTopp() == null) {
                         // we sample from this distribution to get the next token
-                        next = sample(state, config.vocab_size);
+                        next = sampler.sample(state, config.vocab_size);
                     } else {
                         // top-p (nucleus) sampling, clamping the least likely tokens to zero
-                        next = sample_topp(state, config.vocab_size, commandLine.getTopp());
+                        next = sampler.sample_topp(state, config.vocab_size, commandLine.getTopp());
                     }
                 }
             }
@@ -645,8 +594,8 @@ public class Run {
             if (next == 1) {
                 break;
             }
-            // following BOS token (1), sentencepiece decoder strips any leading whitespace (see PR #89)
-            String token_str = (token == 1 && vocab[next].charAt(0) == ' ') ? vocab[next] + 1 : vocab[next];
+
+            String token_str = tokenizer.bpe_decode(token, next);
             Output.emit(token_str);
 
             token = next;
@@ -668,11 +617,11 @@ public class Run {
 
         context.close();
 
+        tokenizer.close();
+
         // report achieved tok/s
         if (pos > 1) {
             LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (pos - 1) / (double) (end - start) * 1000));
         }
-
-        // closing try-scope triggers memory and file handles cleanup
     }
 }
