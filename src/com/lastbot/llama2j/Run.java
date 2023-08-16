@@ -596,7 +596,9 @@ public class Run {
             }
 
             String token_str = tokenizer.bpe_decode(token, next);
-            Output.emit(token_str);
+            if (token_str != null) {
+                Output.emit(token_str);
+            }
 
             token = next;
 
