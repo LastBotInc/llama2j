@@ -42,94 +42,115 @@ public class RunState implements Closeable {
 
     ProbIndex[] probIndex; // buffer used in top-p sampling, CPU only
 
-    Pointer xCU;
-    Pointer xbCU;
-    Pointer xb2CU;
-    Pointer hbCU;
-    Pointer hb2CU;
-    Pointer qCU;
-    Pointer kCU;
-    Pointer vCU;
-    Pointer attCU;
-    Pointer logitsCU;
-    Pointer l_key_cacheCU;
-    Pointer l_value_cacheCU;
+    Pointer[] xCU;
+    Pointer[] xbCU;
+    Pointer[] xb2CU;
+    Pointer[] hbCU;
+    Pointer[] hb2CU;
+    Pointer[] qCU;
+    Pointer[] kCU;
+    Pointer[] vCU;
+    Pointer[] attCU;
+    Pointer[] logitsCU;
+    Pointer[] l_key_cacheCU;
+    Pointer[] l_value_cacheCU;
 
-    public static long bytesStatic(Config config) {
+    public static long bytesStatic(Config p) {
+        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
         return (long) Float.BYTES * (
-                ((long) config.dim) +
-                        ((long) config.dim) +
-                        ((long) config.dim) +
-                        ((long) config.hidden_dim) +
-                        ((long) config.hidden_dim) +
-                        ((long) config.dim) +
-                        ((long) config.dim) +
-                        ((long) config.dim) +
-                        ((long) config.n_heads * config.seq_len) +
-                        ((long) config.vocab_size)
+                ((long) p.dim) +
+                        ((long) p.dim) +
+                        ((long) p.dim) +
+                        ((long) p.hidden_dim) +
+                        ((long) p.hidden_dim) +
+                        ((long) p.dim) +
+                        ((long) kv_dim) +
+                        ((long) kv_dim) +
+                        ((long) p.n_heads * p.seq_len) +
+                        ((long) p.vocab_size)
                 // omit probIndex, as it is currently only CPU
         );
     }
 
-    public static long bytesPerLayer(Config config) {
+    public static long bytesPerLayer(Config p) {
+        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
         return (long) Float.BYTES * (
-                ((long) config.seq_len * config.dim) +
-                        ((long) config.seq_len * config.dim)
+                ((long) p.seq_len * kv_dim) +
+                        ((long) p.seq_len * kv_dim)
         );
     }
 
-    public RunState(Context context, Config config) {
-        this.config = config;
+    public RunState(Context context, Config p) {
+        this.config = p;
         this.c = context;
 
-        if (context.cpu != null) {
-            long t0 = System.currentTimeMillis();
-            x = c.cpu.allocateFloatArray(config.dim);
-            xb = c.cpu.allocateFloatArray(config.dim);
-            xb2 = c.cpu.allocateFloatArray(config.dim);
-            hb = c.cpu.allocateFloatArray(config.hidden_dim);
-            hb2 = c.cpu.allocateFloatArray(config.hidden_dim);
-            q = c.cpu.allocateFloatArray(config.dim);
-            k = c.cpu.allocateFloatArray(config.dim);
-            v = c.cpu.allocateFloatArray(config.dim);
-            att = c.cpu.allocateFloatArray((long) config.n_heads * config.seq_len);
-            logits = c.cpu.allocateFloatArray(config.vocab_size);
-            probIndex = new ProbIndex[config.vocab_size];
-            l_key_cache = c.cpu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
-            l_value_cache = c.cpu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
-            long t1 = System.currentTimeMillis();
-            LLogger.time("Create RunState CPU", t0, t1);
+        long t0 = System.currentTimeMillis();
+        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
+        x = c.cpu.allocateFloatArray(p.dim);
+        xb = c.cpu.allocateFloatArray(p.dim);
+        xb2 = c.cpu.allocateFloatArray(p.dim);
+        hb = c.cpu.allocateFloatArray(p.hidden_dim);
+        hb2 = c.cpu.allocateFloatArray(p.hidden_dim);
+        q = c.cpu.allocateFloatArray(p.dim);
+        k = c.cpu.allocateFloatArray(kv_dim);
+        v = c.cpu.allocateFloatArray(kv_dim);
+        att = c.cpu.allocateFloatArray((long) p.n_heads * p.seq_len);
+        logits = c.cpu.allocateFloatArray(p.vocab_size);
+
+        probIndex = new ProbIndex[p.vocab_size];
+        for (int i = 0; i < p.vocab_size; i++) {
+            probIndex[i] = new ProbIndex();
         }
 
+        l_key_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
+        l_value_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
+        long t1 = System.currentTimeMillis();
+        LLogger.time("Create RunState CPU", t0, t1);
+
         if (context.layerAllocation.deviceCount > 0) {
-            long t0 = System.currentTimeMillis();
+            long t2 = System.currentTimeMillis();
+            int n = context.layerAllocation.deviceCount;
+
+            xCU = new Pointer[n];
+            xbCU = new Pointer[n];
+            xb2CU = new Pointer[n];
+            hbCU = new Pointer[n];
+            hb2CU = new Pointer[n];
+            qCU = new Pointer[n];
+            kCU = new Pointer[n];
+            vCU = new Pointer[n];
+            attCU = new Pointer[n];
+            logitsCU = new Pointer[n];
+            l_key_cacheCU = new Pointer[n];
+            l_value_cacheCU = new Pointer[n];
+
             for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = c.cudas[dev];
                 int firstLayer = context.layerAllocation.firstLayer[dev];
                 int lastLayer = context.layerAllocation.lastLayer[dev];
 
-                xCU = cu.allocateFloatArray(config.dim, true);
-                xbCU = cu.allocateFloatArray(config.dim, true);
-                xb2CU = cu.allocateFloatArray(config.dim, true);
-                hbCU = cu.allocateFloatArray(config.hidden_dim, true);
-                hb2CU = cu.allocateFloatArray(config.hidden_dim, true);
-                qCU = cu.allocateFloatArray(config.dim, true);
-                kCU = cu.allocateFloatArray(config.dim, true);
-                vCU = cu.allocateFloatArray(config.dim, true);
-                attCU = cu.allocateFloatArray((long) config.n_heads * config.seq_len, true);
-                logitsCU = cu.allocateFloatArray(config.vocab_size, true);
+                xCU[dev] = cu.allocateFloatArray(p.dim, true);
+                xbCU[dev] = cu.allocateFloatArray(p.dim, true);
+                xb2CU[dev] = cu.allocateFloatArray(p.dim, true);
+                hbCU[dev] = cu.allocateFloatArray(p.hidden_dim, true);
+                hb2CU[dev] = cu.allocateFloatArray(p.hidden_dim, true);
+                qCU[dev] = cu.allocateFloatArray(p.dim, true);
+                kCU[dev] = cu.allocateFloatArray(kv_dim, true);
+                vCU[dev] = cu.allocateFloatArray(kv_dim, true);
+                attCU[dev] = cu.allocateFloatArray((long) p.n_heads * p.seq_len, true);
+                logitsCU[dev] = cu.allocateFloatArray(p.vocab_size, true);
 
                 int nLayers = lastLayer - firstLayer + 1;
-                int lengthOfLayerData = nLayers * (config.seq_len * config.dim);
+                int lengthOfLayerData = nLayers * (p.seq_len * kv_dim);
 
-                l_key_cacheCU = cu.allocateFloatArray(lengthOfLayerData, true);
-                l_value_cacheCU = cu.allocateFloatArray(lengthOfLayerData, true);
+                l_key_cacheCU[dev] = cu.allocateFloatArray(lengthOfLayerData, true);
+                l_value_cacheCU[dev] = cu.allocateFloatArray(lengthOfLayerData, true);
 
 //                l_key_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
 //                l_value_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
             }
-            long t1 = System.currentTimeMillis();
-            LLogger.time("Create RunState CUDA", t0, t1);
+            long t3 = System.currentTimeMillis();
+            LLogger.time("Create RunState CUDA", t2, t3);
         }
     }
 
