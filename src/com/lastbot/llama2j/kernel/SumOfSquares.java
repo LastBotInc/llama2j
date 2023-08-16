@@ -46,6 +46,7 @@ public class SumOfSquares extends Kernel {
         cuda.synchronizeKernel(0);
         cuda.copyFromDeviceToHost(pSum, sum);
         cuda.copyFromDeviceToHost(px, x);
+        cuda.synchronizeTransfer();
         cuda.free(pSum);
         cuda.free(px);
 
@@ -59,7 +60,7 @@ public class SumOfSquares extends Kernel {
     public void call(int kernelStreamId, Pointer sum, Pointer x, int size) {
         CUstream stream = cuda.getCUKernelStream(kernelStreamId);
         if (size <= SMALL_KERNEL) {
-            int blockSizeX = findNextPowerOf2(size);
+            int blockSizeX = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
             int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
             int sharedMemory = blockSizeX * Float.BYTES;
 
