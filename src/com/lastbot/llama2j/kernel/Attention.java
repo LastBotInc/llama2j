@@ -1,7 +1,6 @@
 package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
-import com.lastbot.llama2j.LLogger;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUfunction;
@@ -35,16 +34,14 @@ public class Attention extends Kernel {
 
     public void test(float[] score, float[] q, float[] l_key_cache, int queryIndex, int keyIndex, int head_size) {
         float[] copyOfScore = Arrays.copyOf(score, score.length);
-        Pointer pScore = cuda.allocateAndCopyToDevice(score, false);
-        Pointer pq = cuda.allocateAndCopyToDevice(q, false);
-        Pointer pL_key_cache = cuda.allocateAndCopyToDevice(l_key_cache, false);
-        cuda.synchronizeTransfer();
-
-        call(0, pScore, pq, pL_key_cache, queryIndex, keyIndex, head_size);
-
-        cuda.synchronizeKernel(0);
-        cuda.copyFromDeviceToHost(pScore, score);
-        cuda.synchronizeTransfer();
+        Pointer pScore = cuda.allocateAndCopyToDevice(TEST_STREAM, score, false);
+        Pointer pq = cuda.allocateAndCopyToDevice(TEST_STREAM, q, false);
+        Pointer pL_key_cache = cuda.allocateAndCopyToDevice(TEST_STREAM, l_key_cache, false);
+        cuda.synchronizeStream(TEST_STREAM);
+        call(TEST_STREAM, pScore, pq, pL_key_cache, queryIndex, keyIndex, head_size);
+        cuda.synchronizeStream(TEST_STREAM);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pScore, score);
+        cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pScore);
         cuda.free(pq);
         cuda.free(pL_key_cache);
@@ -55,16 +52,15 @@ public class Attention extends Kernel {
                 score, copyOfScore, 1e-5f);
     }
 
-    private static void sleep(int ms) {
-        try {
-            Thread.sleep(ms);
-        } catch (InterruptedException e) {
-        }
+    public void call(int streamId, Pointer score, Pointer q, Pointer l_key_cache, int queryIndex, int keyIndex,
+                     int head_size) {
+        Pointer l_key_cacheWithOffset = l_key_cache.withByteOffset((long) keyIndex * Sizeof.FLOAT);
+
+        call(streamId, score, q, l_key_cacheWithOffset, queryIndex, head_size);
     }
 
-    public void call(int kernelStreamId, Pointer score, Pointer q, Pointer l_key_cache, int queryIndex, int keyIndex,
-                     int head_size) {
-        CUstream stream = cuda.getCUKernelStream(kernelStreamId);
+    public void call(int streamId, Pointer score, Pointer q, Pointer l_key_cache, int queryIndex, int head_size) {
+        CUstream stream = cuda.getCUKernelStream(streamId);
         if (head_size <= SMALL_KERNEL && head_size % 2 == 0) {
             int blockSizeX = findNextPowerOf2(head_size);
 //            int blockSizeX = head_size;
@@ -75,7 +71,7 @@ public class Attention extends Kernel {
             Pointer kernelParameters = Pointer.to(
                     Pointer.to(score),
                     Pointer.to(q.withByteOffset((long) queryIndex * Sizeof.FLOAT)),
-                    Pointer.to(l_key_cache.withByteOffset((long) keyIndex * Sizeof.FLOAT)),
+                    Pointer.to(l_key_cache),
                     Pointer.to(new int[]{head_size})
             );
 
@@ -86,7 +82,7 @@ public class Attention extends Kernel {
                     kernelParameters, null // Kernel- and extra parameters
             ));
             if (SYNC_KERNEL_CALLS) {
-                cuda.synchronizeKernel(kernelStreamId);
+                cuda.synchronizeStream(streamId);
             }
         } else {
             throw new RuntimeException("AttentionScore.call invalid head size" + head_size);
