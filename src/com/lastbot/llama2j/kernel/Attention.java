@@ -79,12 +79,12 @@ public class Attention extends Kernel {
                     Pointer.to(new int[]{head_size})
             );
 
-            cuLaunchKernel(smallKernel,
+            isError(cuLaunchKernel(smallKernel,
                     gridSizeX, 1, 1,          // Grid dimension
                     blockSizeX, 1, 1,      // Block dimension
                     sharedMemory, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
-            );
+            ));
         } else {
             throw new RuntimeException("AttentionScore.call invalid head size" + head_size);
         }

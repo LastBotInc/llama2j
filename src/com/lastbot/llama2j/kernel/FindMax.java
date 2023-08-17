@@ -71,12 +71,12 @@ public class FindMax extends Kernel {
                     Pointer.to(new int[]{size})
             );
 
-            cuLaunchKernel(smallKernel,
+            isError(cuLaunchKernel(smallKernel,
                     gridSizeX, 1, 1,         // Grid dimension
                     blockSizeX, 1, 1,      // Block dimension
                     sharedMemory, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
-            );
+            ));
         } else if (size <= LARGE_KERNEL) {
             int threadsPerBlock = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
@@ -93,12 +93,12 @@ public class FindMax extends Kernel {
                         Pointer.to(x),
                         Pointer.to(new int[]{size})
                 );
-                cuLaunchKernel(largeLocalMaxKernel,
+                isError(cuLaunchKernel(largeLocalMaxKernel,
                         gridSizeX, 1, 1,          // Grid dimension
                         blockSizeX, 1, 1,      // Block dimension
                         sharedMemory, stream,  // Shared memory size and stream
                         kernelParameters, null // Kernel- and extra parameters
-                );
+                ));
             }
 //            cuda.synchronizeKernel(kernelStreamId);
             // reduction
@@ -113,12 +113,12 @@ public class FindMax extends Kernel {
                         Pointer.to(blockMax),
                         Pointer.to(new int[]{blocksPerGrid})
                 );
-                cuLaunchKernel(largeReductionKernel,
+                isError(cuLaunchKernel(largeReductionKernel,
                         gridSizeX, 1, 1,          // Grid dimension
                         blockSizeX, 1, 1,      // Block dimension
                         sharedMemory, stream,  // Shared memory size and stream
                         kernelParameters, null // Kernel- and extra parameters
-                );
+                ));
             }
             cuda.free(blockMax);
         } else {

@@ -78,12 +78,12 @@ public class ExpAndSum extends Kernel {
                     Pointer.to(new int[]{size})
             );
 
-            cuLaunchKernel(smallKernel,
+            isError(cuLaunchKernel(smallKernel,
                     gridSizeX, 1, 1,          // Grid dimension
                     blockSizeX, 1, 1,      // Block dimension
                     sharedMemory, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
-            );
+            ));
         } else if (size <= LARGE_KERNEL) {
             int threadsPerBlock = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
@@ -102,12 +102,12 @@ public class ExpAndSum extends Kernel {
                         Pointer.to(new int[]{index}),
                         Pointer.to(new int[]{size})
                 );
-                cuLaunchKernel(largeLocalSumKernel,
+                isError(cuLaunchKernel(largeLocalSumKernel,
                         gridSizeX, 1, 1,          // Grid dimension
                         blockSizeX, 1, 1,      // Block dimension
                         sharedMemory, stream,  // Shared memory size and stream
                         kernelParameters, null // Kernel- and extra parameters
-                );
+                ));
             }
 //            cuda.synchronizeKernel(kernelStreamId);
             // reduction
@@ -122,12 +122,12 @@ public class ExpAndSum extends Kernel {
                         Pointer.to(blockSum),
                         Pointer.to(new int[]{blocksPerGrid})
                 );
-                cuLaunchKernel(largeReductionKernel,
+                isError(cuLaunchKernel(largeReductionKernel,
                         gridSizeX, 1, 1,          // Grid dimension
                         blockSizeX, 1, 1,      // Block dimension
                         sharedMemory, stream,  // Shared memory size and stream
                         kernelParameters, null // Kernel- and extra parameters
-                );
+                ));
             }
             cuda.free(blockSum);
         } else {
