@@ -78,6 +78,9 @@ public class MatMul extends Kernel {
                 0, stream,  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
         ));
+        if (SYNC_KERNEL_CALLS) {
+            cuda.synchronizeKernel(kernelStreamId);
+        }
     }
 
     private CUfunction create() {
