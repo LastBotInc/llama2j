@@ -68,12 +68,12 @@ public class WeightNormalizeAndScale extends Kernel {
         int blockSizeX = Math.min(findNextPowerOf2(size), 1024);
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
-        cuLaunchKernel(kernel,
+        isError(cuLaunchKernel(kernel,
                 gridSizeX, 1, 1,          // Grid dimension
                 blockSizeX, 1, 1,      // Block dimension
                 0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
-        );
+        ));
     }
 
     private CUfunction create() {
