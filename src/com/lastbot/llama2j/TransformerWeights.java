@@ -2,7 +2,7 @@ package com.lastbot.llama2j;
 
 import jcuda.Pointer;
 
-import static com.lastbot.llama2j.LayerMemoryUtil.allocateAndCopyLayers;
+import static com.lastbot.llama2j.ContextCUDA.allocateAndCopyLayers;
 
 public class TransformerWeights {
     float[] token_embedding_table;    // (vocab_size, dim)
@@ -51,20 +51,20 @@ public class TransformerWeights {
         );
     }
 
-    Pointer token_embedding_tableCU;    // (vocab_size, dim)
-    Pointer l_rms_att_weightCU; // (layer, dim) rmsnorm weights
-    Pointer l_rms_ffn_weightCU; // (layer, dim)
-    Pointer l_wqCU; // (layer, dim, dim)
-    Pointer l_wkCU; // (layer, dim, dim)
-    Pointer l_wvCU; // (layer, dim, dim)
-    Pointer l_woCU; // (layer, dim, dim)
-    Pointer l_w1CU; // (layer, hidden_dim, dim)
-    Pointer l_w2CU; // (layer, dim, hidden_dim)
-    Pointer l_w3CU; // (layer, hidden_dim, dim)
-    Pointer rms_final_weightCU; // (dim,)
-    Pointer freq_cis_realCU; // (seq_len, dim/2)
-    Pointer freq_cis_imagCU; // (seq_len, dim/2)
-    Pointer wclsCU;
+    Pointer[] token_embedding_tableCU;    // (vocab_size, dim)
+    SlicePointer[] l_rms_att_weightCU; // (layer, dim) rmsnorm weights
+    SlicePointer[] l_rms_ffn_weightCU; // (layer, dim)
+    SlicePointer[] l_wqCU; // (layer, dim, dim)
+    SlicePointer[] l_wkCU; // (layer, dim, dim)
+    SlicePointer[] l_wvCU; // (layer, dim, dim)
+    SlicePointer[] l_woCU; // (layer, dim, dim)
+    SlicePointer[] l_w1CU; // (layer, hidden_dim, dim)
+    SlicePointer[] l_w2CU; // (layer, dim, hidden_dim)
+    SlicePointer[] l_w3CU; // (layer, hidden_dim, dim)
+    Pointer[] rms_final_weightCU; // (dim,)
+    Pointer[] freq_cis_realCU; // (seq_len, dim/2)
+    Pointer[] freq_cis_imagCU; // (seq_len, dim/2)
+    Pointer[] wclsCU;
 
     public TransformerWeights(Context context, BinFileReader reader, Config p, boolean sharedWeights) {
         // token embedding table
@@ -92,29 +92,51 @@ public class TransformerWeights {
         // copy weights to CUDA
         if (context.layerAllocation.deviceCount > 0) {
             long t2 = System.currentTimeMillis();
+
+            int n = context.layerAllocation.deviceCount;
+
+            token_embedding_tableCU = new Pointer[n];
+            l_rms_att_weightCU = new SlicePointer[n];
+            l_rms_ffn_weightCU = new SlicePointer[n];
+            l_wqCU = new SlicePointer[n];
+            l_wkCU = new SlicePointer[n];
+            l_wvCU = new SlicePointer[n];
+            l_woCU = new SlicePointer[n];
+            l_w1CU = new SlicePointer[n];
+            l_w2CU = new SlicePointer[n];
+            l_w3CU = new SlicePointer[n];
+            rms_final_weightCU = new Pointer[n];
+            freq_cis_realCU = new Pointer[n];
+            freq_cis_imagCU = new Pointer[n];
+            wclsCU = new Pointer[n];
+
             for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = context.cudas[dev];
-                token_embedding_tableCU = cu.allocateAndCopyToDevice(token_embedding_table, true);
+                token_embedding_tableCU[dev] = cu.allocateAndCopyToDevice(0, token_embedding_table, true);
                 int firstLayer = context.layerAllocation.firstLayer[dev];
                 int lastLayer = context.layerAllocation.lastLayer[dev];
 
-                l_rms_att_weightCU = allocateAndCopyLayers(cu, l_rms_att_weight, firstLayer, lastLayer, p.n_layers);
-                l_wqCU = allocateAndCopyLayers(cu, l_wq, firstLayer, lastLayer, p.n_layers);
-                l_wkCU = allocateAndCopyLayers(cu, l_wk, firstLayer, lastLayer, p.n_layers);
-                l_wvCU = allocateAndCopyLayers(cu, l_wv, firstLayer, lastLayer, p.n_layers);
-                l_woCU = allocateAndCopyLayers(cu, l_wo, firstLayer, lastLayer, p.n_layers);
-                l_rms_ffn_weightCU = allocateAndCopyLayers(cu, l_rms_ffn_weight, firstLayer, lastLayer, p.n_layers);
-                l_w1CU = allocateAndCopyLayers(cu, l_w1, firstLayer, lastLayer, p.n_layers);
-                l_w2CU = allocateAndCopyLayers(cu, l_w2, firstLayer, lastLayer, p.n_layers);
-                l_w3CU = allocateAndCopyLayers(cu, l_w3, firstLayer, lastLayer, p.n_layers);
-                rms_final_weightCU = cu.allocateAndCopyToDevice(rms_final_weight, true);
-                freq_cis_realCU = cu.allocateAndCopyToDevice(freq_cis_real, true);
-                freq_cis_imagCU = cu.allocateAndCopyToDevice(freq_cis_imag, true);
-                wclsCU = sharedWeights ? token_embedding_tableCU : cu.allocateAndCopyToDevice(wcls, true);
+                l_rms_att_weightCU[dev] = allocateAndCopyLayers(1, cu, l_rms_att_weight, firstLayer, lastLayer, p.n_layers);
+                l_rms_ffn_weightCU[dev] = allocateAndCopyLayers(2, cu, l_rms_ffn_weight, firstLayer, lastLayer, p.n_layers);
+                l_wqCU[dev] = allocateAndCopyLayers(3, cu, l_wq, firstLayer, lastLayer, p.n_layers);
+                l_wkCU[dev] = allocateAndCopyLayers(4, cu, l_wk, firstLayer, lastLayer, p.n_layers);
+                l_wvCU[dev] = allocateAndCopyLayers(5, cu, l_wv, firstLayer, lastLayer, p.n_layers);
+                l_woCU[dev] = allocateAndCopyLayers(6, cu, l_wo, firstLayer, lastLayer, p.n_layers);
+                l_w1CU[dev] = allocateAndCopyLayers(7, cu, l_w1, firstLayer, lastLayer, p.n_layers);
+                l_w2CU[dev] = allocateAndCopyLayers(8, cu, l_w2, firstLayer, lastLayer, p.n_layers);
+                l_w3CU[dev] = allocateAndCopyLayers(9, cu, l_w3, firstLayer, lastLayer, p.n_layers);
+
+                rms_final_weightCU[dev] = cu.allocateAndCopyToDevice(10, rms_final_weight, true);
+                freq_cis_realCU[dev] = cu.allocateAndCopyToDevice(11, freq_cis_real, true);
+                freq_cis_imagCU[dev] = cu.allocateAndCopyToDevice(12, freq_cis_imag, true);
+                wclsCU[dev] = sharedWeights ? token_embedding_tableCU[dev] : cu.allocateAndCopyToDevice(13, wcls, true);
+            }
+            for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
+                ContextCUDA cu = context.cudas[dev];
+                cu.synchronizeAllStreams();
             }
             long t3 = System.currentTimeMillis();
             LLogger.time("Create TransformerWeights CUDA", t2, t3);
         }
     }
-
 }
