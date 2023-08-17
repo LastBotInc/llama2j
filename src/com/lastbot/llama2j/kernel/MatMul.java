@@ -2,28 +2,21 @@ package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
 import jcuda.Pointer;
-import jcuda.jcublas.JCublas2;
-import jcuda.jcublas.cublasHandle;
-import jcuda.jcublas.cublasOperation;
+import jcuda.Sizeof;
+import jcuda.driver.CUfunction;
+import jcuda.driver.CUstream;
 
 import java.util.Arrays;
 
-public class MatMul extends Kernel {
+import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
-    private final cublasHandle[] cublasHandles;
-    private static final float[] alphaArray = new float[]{1.0f};
-    private static final float[] betaArray = new float[]{0.0f};
-    private final Pointer pAlpha;
-    private final Pointer pBeta;
+public class MatMul extends Kernel {
+    private final CUfunction kernel;
 
     public MatMul(ContextCUDA cuda) {
         super(cuda, "matMul");
-
-        this.cublasHandles = cuda.createCublasHandles();
         cuda.setDevice();
-        this.pAlpha = Pointer.to(alphaArray);
-        this.pBeta = Pointer.to(betaArray);
-        cuda.synchronizeTransfer();
+        kernel = create();
     }
 
     public static void call(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
@@ -60,15 +53,50 @@ public class MatMul extends Kernel {
         call(copyOfXout, copyOfx, w, weightIndex, n, d);
 
         compareWithThreshold("MatMul.call xout ",
-                xout, copyOfXout, 1e-2f);
+                xout, copyOfXout, 1e-5f);
     }
 
     public void call(int kernelStreamId, Pointer xout, Pointer x, Pointer w, int weightIndex, int n, int d) {
-        Pointer wWithIndex = w.withByteOffset((long) weightIndex * Float.BYTES);
-        cuda.setDevice();
-        JCublas2.cublasSgemv(cublasHandles[kernelStreamId], cublasOperation.CUBLAS_OP_T,
-                n, d, pAlpha, wWithIndex, n, x, 1, pBeta, xout, 1);
-        //        JCublas.cublasSgemv('t', n, d, 1.0f, wWithIndex, n, x, 1, 0.0f, xout, 1);
-//        JCublas.cublasSgemv('n', n, d, 1.0f, w, n, x, 1, 0.0f, xout, 1);
+        CUstream stream = cuda.getCUKernelStream(kernelStreamId);
+        int blockSizeX = Math.min(findNextPowerOf2(d), MAX_THREADS_PER_BLOCK);
+        int gridSizeX = (int) Math.ceil((double) d / blockSizeX);
+
+//        __global__ void matMul(float* xout, float* x, float* w, int n, int d) {
+        Pointer wIndexed = w.withByteOffset((long) weightIndex * Sizeof.FLOAT);
+
+        Pointer kernelParameters = Pointer.to(
+                Pointer.to(xout),
+                Pointer.to(x),
+                Pointer.to(wIndexed),
+                Pointer.to(new int[]{n}),
+                Pointer.to(new int[]{d})
+        );
+
+        isError(cuLaunchKernel(kernel,
+                gridSizeX, 1, 1,          // Grid dimension
+                blockSizeX, 1, 1,      // Block dimension
+                0, stream,  // Shared memory size and stream
+                kernelParameters, null // Kernel- and extra parameters
+        ));
+    }
+
+    private CUfunction create() {
+        String code =
+                """
+                            extern "C"
+                            __global__ void matMul(float* xout, float* x, float* w, int n, int d) {
+                                int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+                                if (i < d) {
+                                    float* weightPos = w + i * n;
+                                    float val = 0.0f;
+                                    for (int j = 0; j < n; j++) {
+                                        val += weightPos[j] * x[j];
+                                    }
+                                    xout[i] = val;
+                                }
+                            }
+                        """;
+        return loadFromCode(code, "matMul");
     }
 }
