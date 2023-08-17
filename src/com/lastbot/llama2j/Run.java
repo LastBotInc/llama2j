@@ -105,10 +105,10 @@ public class Run {
         boolean cuda = context.cudas != null && context.cudas.length > 0;
         if (cpu) {
 //            transformerCPU(token, pos, p, s, w, context);
-//            transformerTest(token, pos, p, s, w, context);
+            transformerTest(token, pos, p, s, w, context);
         }
 //        if (cuda) {
-            transformerCUDA(token, pos, p, s, w, context);
+//            transformerCUDA(token, pos, p, s, w, context);
 //        }
     }
 
@@ -511,7 +511,7 @@ public class Run {
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
 
-            JCuda.cudaMemset(tmp1CU, 0, Sizeof.FLOAT);
+            cuda.setArray(tmp1CU, 0, Sizeof.FLOAT);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
             cuda.weightNormalizeAndScale.call(
                     0, xbCU, xCU, w.l_rms_att_weightCU, l * dim, tmp1CU, dim);
@@ -525,16 +525,18 @@ public class Run {
             cuda.applyRope.call(0, qCU, kCU, w.freq_cis_realCU, w.freq_cis_imagCU,
                     dim, kv_dim, head_size, freq_cis_imag_row);
 
+            cuda.synchronizeKernel(0);
+
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
 
+            int byteOffset = (loff + pos * kv_dim) * Sizeof.FLOAT;
+
 //            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
-            cudaMemcpy(l_key_cacheCU.withByteOffset((loff + (long) pos * kv_dim) * Sizeof.FLOAT),
-                    kCU, kv_dim, cudaMemcpyDeviceToDevice);
+            cuda.copyFromDeviceToDevice(kCU, l_key_cacheCU.withByteOffset(byteOffset), kv_dim);
 
 //            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
-            cudaMemcpy(l_value_cacheCU.withByteOffset((loff + (long) pos * kv_dim) * Sizeof.FLOAT),
-                    vCU, kv_dim, cudaMemcpyDeviceToDevice);
+            cuda.copyFromDeviceToDevice(vCU, l_value_cacheCU.withByteOffset(byteOffset), kv_dim);
 
             // multihead attention. iterate over all heads
             int h;
