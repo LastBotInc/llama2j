@@ -1,5 +1,7 @@
 package com.lastbot.llama2j;
 
+import com.lastbot.llama2j.kernel.Mode;
+
 public class LayerAllocation {
     public int deviceCount;
     public long staticBytes;
@@ -17,7 +19,7 @@ public class LayerAllocation {
         return deviceCount > 0;
     }
 
-    public LayerAllocation(long[] gpuMem, Config config, Target target, boolean sharedWeights) {
+    public LayerAllocation(long[] gpuMem, Config config, Mode mode, boolean sharedWeights) {
         long weightStatic = TransformerWeights.bytesStatic(config, sharedWeights);
         long weightPerLayer = TransformerWeights.bytesPerLayer(config);
         long stateStatic = RunState.bytesStatic(config);
@@ -37,7 +39,7 @@ public class LayerAllocation {
         LLogger.info("One Device: Static bytes " + String.format("%,d", staticBytes));
         LLogger.info("One Device: Layer bytes " + String.format("%,d", config.n_layers * bytesPerLayer));
 
-        if (!target.CUDA() || gpuMem == null) {
+        if (mode == Mode.CPU) {
             this.deviceCount = 0;
             this.firstCPULayer = 0;
             this.lastCPULayer = config.n_layers;
@@ -66,8 +68,10 @@ public class LayerAllocation {
             LLogger.info(deviceCount + " Devices: layer capacity " + String.format("%,d", layerCapacity));
 
             double layerUtilization = (double) layerSize / layerCapacity;
+            double LayerUtilizationPercentage = 100D * layerUtilization;
 
-            LLogger.info(deviceCount + " Devices: layer capacity utilization " + String.format("%.2f", layerUtilization));
+            LLogger.info(deviceCount + " Devices: layer capacity utilization " +
+                    String.format("%.2f", LayerUtilizationPercentage) + "%");
 
             int nextLayer = 0;
             for (int dev = 0; dev < deviceCount; dev++) {
@@ -86,7 +90,8 @@ public class LayerAllocation {
                 firstCPULayer = nextLayer;
                 lastCPULayer = config.n_layers - 1;
             }
-            // zzz for testing only override
+            // todo zzz for testing only -> keep this if mode == CPU, otherwise include layers
+            // that do not fit into configured CUDA memory
             firstCPULayer = 0;
             lastCPULayer = config.n_layers - 1;
         }
