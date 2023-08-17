@@ -85,6 +85,9 @@ public class Attention extends Kernel {
                     sharedMemory, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
             ));
+            if (SYNC_KERNEL_CALLS) {
+                cuda.synchronizeKernel(kernelStreamId);
+            }
         } else {
             throw new RuntimeException("AttentionScore.call invalid head size" + head_size);
         }
@@ -108,8 +111,7 @@ public class Attention extends Kernel {
 
                                 // Block-wise reduction
                                 for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                    // if (tid < stride && threadIdx.x + stride < head_size) {
-                                    if (tid < stride) {
+                                    if (tid < stride && (threadIdx.x + stride) < blockDim.x) {
                                         sdata[threadIdx.x] += sdata[threadIdx.x + stride];
                                     }
                                     __syncthreads();  // Ensure all threads in block are in sync after each step

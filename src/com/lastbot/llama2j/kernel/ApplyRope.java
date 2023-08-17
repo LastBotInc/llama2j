@@ -99,6 +99,10 @@ public class ApplyRope extends Kernel {
                 0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
         ));
+
+        if (SYNC_KERNEL_CALLS) {
+            cuda.synchronizeKernel(kernelStreamId);
+        }
     }
 
     private CUfunction create() {
@@ -111,7 +115,7 @@ public class ApplyRope extends Kernel {
                             {
                                 // process elements in steps of 2
                                 int i = blockIdx.x * blockDim.x + threadIdx.x;
-                                
+
                                 if (i % 2 != 0) {
                                     return;
                                 }

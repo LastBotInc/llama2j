@@ -58,6 +58,9 @@ public class Accum extends Kernel {
                 0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
         ));
+        if (SYNC_KERNEL_CALLS) {
+            cuda.synchronizeKernel(kernelStreamId);
+        }
     }
 
     private CUfunction create() {

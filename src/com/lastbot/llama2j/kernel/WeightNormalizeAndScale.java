@@ -23,8 +23,8 @@ public class WeightNormalizeAndScale extends Kernel {
     public static void call(float[] out, float[] x, float[] weight, int weightIndex,
                              float[] sumOfSquares, int size) {
         float ss = sumOfSquares[0];
-        for (int j = 0; j < size; j++) {
-            out[j] = weight[weightIndex + j] * (ss * x[j]);
+        for (int i = 0; i < size; i++) {
+            out[i] = weight[weightIndex + i] * (ss * x[i]);
         }
     }
 
@@ -65,7 +65,7 @@ public class WeightNormalizeAndScale extends Kernel {
         );
 
         // Set up the kernel launch parameters.
-        int blockSizeX = Math.min(findNextPowerOf2(size), 1024);
+        int blockSizeX = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
         isError(cuLaunchKernel(kernel,
@@ -74,6 +74,9 @@ public class WeightNormalizeAndScale extends Kernel {
                 0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
         ));
+        if (SYNC_KERNEL_CALLS) {
+            cuda.synchronizeKernel(kernelStreamId);
+        }
     }
 
     private CUfunction create() {
