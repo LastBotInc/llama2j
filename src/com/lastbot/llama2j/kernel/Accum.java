@@ -3,7 +3,6 @@ package com.lastbot.llama2j.kernel;
 import com.lastbot.llama2j.ContextCUDA;
 import jcuda.Pointer;
 import jcuda.driver.CUfunction;
-import jcuda.driver.CUstream;
 
 import java.util.Arrays;
 
@@ -27,13 +26,13 @@ public class Accum extends Kernel {
 
     public void test(float[] a, float[] b, int size) {
         float[] copyOfA = Arrays.copyOf(a, a.length);
-        Pointer pa = cuda.allocateAndCopyToDevice(a, false);
-        Pointer pb = cuda.allocateAndCopyToDevice(b, false);
-        cuda.synchronizeTransfer();
-        call(0, pa, pb, size);
-        cuda.synchronizeKernel(0);
-        cuda.copyFromDeviceToHost(pa, a);
-        cuda.synchronizeTransfer();
+        Pointer pa = cuda.allocateAndCopyToDevice(TEST_STREAM, a, false);
+        Pointer pb = cuda.allocateAndCopyToDevice(TEST_STREAM, b, false);
+        cuda.synchronizeStream(TEST_STREAM);
+        call(TEST_STREAM, pa, pb, size);
+        cuda.synchronizeStream(TEST_STREAM);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pa, a);
+        cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pa);
         cuda.free(pb);
 
@@ -42,7 +41,7 @@ public class Accum extends Kernel {
         compareWithThreshold("Accum.call", a, copyOfA, 1e-5f);
     }
 
-    public void call(int kernelStreamId, Pointer a, Pointer b, int size) {
+    public void call(int streamId, Pointer a, Pointer b, int size) {
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(a),
                 Pointer.to(b),
@@ -55,11 +54,11 @@ public class Accum extends Kernel {
         isError(cuLaunchKernel(kernel,
                 gridSizeX, 1, 1,          // Grid dimension
                 blockSizeX, 1, 1,      // Block dimension
-                0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
+                0, cuda.getCUKernelStream(streamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
         ));
         if (SYNC_KERNEL_CALLS) {
-            cuda.synchronizeKernel(kernelStreamId);
+            cuda.synchronizeStream(streamId);
         }
     }
 

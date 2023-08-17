@@ -47,16 +47,16 @@ public class ApplyRope extends Kernel {
                      int dim, int kv_dim, int head_size, int freq_cis_imag_row) {
         float[] copyOfQ = Arrays.copyOf(q, q.length);
         float[] copyOfK = Arrays.copyOf(k, k.length);
-        Pointer pq = cuda.allocateAndCopyToDevice(q, false);
-        Pointer pk = cuda.allocateAndCopyToDevice(k, false);
-        Pointer pFreq_cis_real = cuda.allocateAndCopyToDevice(freq_cis_real, false);
-        Pointer pFreq_cis_imag = cuda.allocateAndCopyToDevice(freq_cis_imag, false);
-        cuda.synchronizeTransfer();
-        call(0, pq, pk, pFreq_cis_real, pFreq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
-        cuda.synchronizeKernel(0);
-        cuda.copyFromDeviceToHost(pk, k);
-        cuda.copyFromDeviceToHost(pq, q);
-        cuda.synchronizeTransfer();
+        Pointer pq = cuda.allocateAndCopyToDevice(TEST_STREAM, q, false);
+        Pointer pk = cuda.allocateAndCopyToDevice(TEST_STREAM, k, false);
+        Pointer pFreq_cis_real = cuda.allocateAndCopyToDevice(TEST_STREAM, freq_cis_real, false);
+        Pointer pFreq_cis_imag = cuda.allocateAndCopyToDevice(TEST_STREAM, freq_cis_imag, false);
+        cuda.synchronizeStream(TEST_STREAM);
+        call(TEST_STREAM, pq, pk, pFreq_cis_real, pFreq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
+        cuda.synchronizeStream(TEST_STREAM);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pk, k);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pq, q);
+        cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pq);
         cuda.free(pk);
         cuda.free(pFreq_cis_real);
@@ -64,13 +64,11 @@ public class ApplyRope extends Kernel {
 
         call(copyOfQ, copyOfK, freq_cis_real, freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
 
-        cuda.synchronizeTransfer();
-
         compareWithThreshold("ApplyRope.call q", q, copyOfQ, 1e-5f);
         compareWithThreshold("ApplyRope.call k", k, copyOfK, 1e-5f);
     }
 
-    public void call(int kernelStreamId, Pointer q, Pointer k, Pointer freq_cis_real, Pointer freq_cis_imag,
+    public void call(int streamId, Pointer q, Pointer k, Pointer freq_cis_real, Pointer freq_cis_imag,
                      int dim, int kv_dim, int head_size, int freq_cis_imag_row) {
 //        __global__ void applyRope(float *q, float *k,
 //                                  const float *freq_cis_real, const float *freq_cis_imag,
@@ -96,12 +94,12 @@ public class ApplyRope extends Kernel {
         isError(cuLaunchKernel(kernel,
                 gridSizeX, 1, 1,          // Grid dimension
                 blockSizeX, 1, 1,      // Block dimension
-                0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
+                0, cuda.getCUKernelStream(streamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
         ));
 
         if (SYNC_KERNEL_CALLS) {
-            cuda.synchronizeKernel(kernelStreamId);
+            cuda.synchronizeStream(streamId);
         }
     }
 

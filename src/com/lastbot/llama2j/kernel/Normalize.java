@@ -27,13 +27,13 @@ public class Normalize extends Kernel {
 
     public void test(float[] x, float[] divider, int index, int size) {
         float[] copyOfX = Arrays.copyOf(x, x.length);
-        Pointer px = cuda.allocateAndCopyToDevice(x, false);
-        Pointer pDivider = cuda.allocateAndCopyToDevice(divider, false);
-        cuda.synchronizeTransfer();
-        call(0, px, pDivider, index, size);
-        cuda.synchronizeKernel(0);
-        cuda.copyFromDeviceToHost(px, x);
-        cuda.synchronizeTransfer();
+        Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
+        Pointer pDivider = cuda.allocateAndCopyToDevice(TEST_STREAM, divider, false);
+        cuda.synchronizeStream(TEST_STREAM);
+        call(TEST_STREAM, px, pDivider, index, size);
+        cuda.synchronizeStream(TEST_STREAM);
+        cuda.copyFromDeviceToHost(TEST_STREAM, px, x);
+        cuda.synchronizeStream(TEST_STREAM);
         cuda.free(px);
         cuda.free(pDivider);
 
@@ -42,7 +42,7 @@ public class Normalize extends Kernel {
         compareWithThreshold("Normalize.call", x, copyOfX, 1e-5f);
     }
 
-    public void call(int kernelStreamId, Pointer x, Pointer divider, int index, int size) {
+    public void call(int streamId, Pointer x, Pointer divider, int index, int size) {
 //        __global__ void normalize(float *x, float *divider, int index, int size)
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(x),
@@ -57,26 +57,26 @@ public class Normalize extends Kernel {
         isError(cuLaunchKernel(kernel,
                 gridSizeX, 1, 1,          // Grid dimension
                 blockSizeX, 1, 1,      // Block dimension
-                0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
+                0, cuda.getCUKernelStream(streamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
         ));
         if (SYNC_KERNEL_CALLS) {
-            cuda.synchronizeKernel(kernelStreamId);
+            cuda.synchronizeStream(streamId);
         }
     }
 
     private CUfunction create() {
         String code =
                 """
-                    extern "C"
-                    __global__ void normalize(float *x, float *divider, int index, int size)
-                    {
-                        int i = blockIdx.x * blockDim.x + threadIdx.x;
-                        if (i < size) {
-                            x[index + i] /= divider[0];
-                        }
-                    }
-                """;
+                            extern "C"
+                            __global__ void normalize(float *x, float *divider, int index, int size)
+                            {
+                                int i = blockIdx.x * blockDim.x + threadIdx.x;
+                                if (i < size) {
+                                    x[index + i] /= divider[0];
+                                }
+                            }
+                        """;
         return loadFromCode(code, "normalize");
     }
 }

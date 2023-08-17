@@ -39,13 +39,12 @@ public class FindMax extends Kernel {
 
     public void test(float[] max, float[] x, int index, int size) {
         float[] copyOfMax = Arrays.copyOf(max, max.length);
-        Pointer pMax = cuda.allocateAndCopyToDevice(max, false);
-        Pointer px = cuda.allocateAndCopyToDevice(x, false);
-        cuda.synchronizeTransfer();
-        call(0, pMax, px, index, size);
-        cuda.synchronizeKernel(0);
-        cuda.copyFromDeviceToHost(pMax, max);
-        cuda.synchronizeTransfer();
+        Pointer pMax = cuda.allocateAndCopyToDevice(TEST_STREAM, max, false);
+        Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
+        call(TEST_STREAM, pMax, px, index, size);
+        cuda.synchronizeStream(TEST_STREAM);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pMax, max);
+        cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pMax);
         cuda.free(px);
 
@@ -56,8 +55,8 @@ public class FindMax extends Kernel {
                 max, copyOfMax, 1e-2f);
     }
 
-    public void call(int kernelStreamId, Pointer max, Pointer x, int index, int size) {
-        CUstream stream = cuda.getCUKernelStream(kernelStreamId);
+    public void call(int streamId, Pointer max, Pointer x, int index, int size) {
+        CUstream stream = cuda.getCUKernelStream(streamId);
         if (size <= SMALL_KERNEL) {
             int blockSizeX = findNextPowerOf2(size);
             int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
@@ -78,7 +77,7 @@ public class FindMax extends Kernel {
                     kernelParameters, null // Kernel- and extra parameters
             ));
             if (SYNC_KERNEL_CALLS) {
-                cuda.synchronizeKernel(kernelStreamId);
+                cuda.synchronizeStream(streamId);
             }
         } else if (size <= LARGE_KERNEL) {
             int threadsPerBlock = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
@@ -103,10 +102,9 @@ public class FindMax extends Kernel {
                         kernelParameters, null // Kernel- and extra parameters
                 ));
                 if (SYNC_KERNEL_CALLS) {
-                    cuda.synchronizeKernel(kernelStreamId);
+                    cuda.synchronizeStream(streamId);
                 }
             }
-//            cuda.synchronizeKernel(kernelStreamId);
             // reduction
             {
                 int blockSizeX = findNextPowerOf2(blocksPerGrid);
@@ -126,7 +124,7 @@ public class FindMax extends Kernel {
                         kernelParameters, null // Kernel- and extra parameters
                 ));
                 if (SYNC_KERNEL_CALLS) {
-                    cuda.synchronizeKernel(kernelStreamId);
+                    cuda.synchronizeStream(streamId);
                 }
             }
             cuda.free(blockMax);

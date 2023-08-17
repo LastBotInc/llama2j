@@ -39,14 +39,14 @@ public class SumOfSquares extends Kernel {
     public void test(float[] sum, float[] x, int size) {
         float[] copyOfSum = Arrays.copyOf(sum, sum.length);
         float[] copyOfx = Arrays.copyOf(x, x.length);
-        Pointer pSum = cuda.allocateAndCopyToDevice(sum, false);
-        Pointer px = cuda.allocateAndCopyToDevice(x, false);
-        cuda.synchronizeTransfer();
-        call(0, pSum, px, size);
-        cuda.synchronizeKernel(0);
-        cuda.copyFromDeviceToHost(pSum, sum);
-        cuda.copyFromDeviceToHost(px, x);
-        cuda.synchronizeTransfer();
+        Pointer pSum = cuda.allocateAndCopyToDevice(TEST_STREAM, sum, false);
+        Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
+        cuda.synchronizeStream(TEST_STREAM);
+        call(TEST_STREAM, pSum, px, size);
+        cuda.synchronizeStream(TEST_STREAM);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pSum, sum);
+        cuda.copyFromDeviceToHost(TEST_STREAM, px, x);
+        cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pSum);
         cuda.free(px);
 
@@ -57,8 +57,8 @@ public class SumOfSquares extends Kernel {
                 sum, copyOfSum, 1e-2f);
     }
 
-    public void call(int kernelStreamId, Pointer sum, Pointer x, int size) {
-        CUstream stream = cuda.getCUKernelStream(kernelStreamId);
+    public void call(int streamId, Pointer sum, Pointer x, int size) {
+        CUstream stream = cuda.getCUKernelStream(streamId);
         if (size <= SMALL_KERNEL) {
             int blockSizeX = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
             int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
@@ -78,7 +78,7 @@ public class SumOfSquares extends Kernel {
                     kernelParameters, null // Kernel- and extra parameters
             ));
             if (SYNC_KERNEL_CALLS) {
-                cuda.synchronizeKernel(kernelStreamId);
+                cuda.synchronizeStream(streamId);
             }
         } else if (size <= LARGE_KERNEL) {
             int threadsPerBlock = 1024;
@@ -103,7 +103,7 @@ public class SumOfSquares extends Kernel {
                         kernelParameters, null // Kernel- and extra parameters
                 ));
                 if (SYNC_KERNEL_CALLS) {
-                    cuda.synchronizeKernel(kernelStreamId);
+                    cuda.synchronizeStream(streamId);
                 }
             }
             // reduction
@@ -126,7 +126,7 @@ public class SumOfSquares extends Kernel {
                         kernelParameters, null // Kernel- and extra parameters
                 ));
                 if (SYNC_KERNEL_CALLS) {
-                    cuda.synchronizeKernel(kernelStreamId);
+                    cuda.synchronizeStream(streamId);
                 }
             }
             cuda.free(blockSum);
