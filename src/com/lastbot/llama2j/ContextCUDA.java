@@ -28,6 +28,7 @@ public class ContextCUDA implements Closeable {
     public final FindMax findMax;
     public final SumOfSquares sumOfSquares;
     public final MatMul matMul;
+    public final MemSetFloat memSetFloat;
     public final Normalize normalize;
     public final WeightNormalizeAndScale weightNormalizeAndScale;
 
@@ -71,6 +72,7 @@ public class ContextCUDA implements Closeable {
         this.findMax = new FindMax(this);
         this.sumOfSquares = new SumOfSquares(this);
         this.matMul = new MatMul(this);
+        this.memSetFloat = new MemSetFloat(this);
         this.normalize = new Normalize(this);
         this.weightNormalizeAndScale = new WeightNormalizeAndScale(this);
     }
@@ -142,10 +144,6 @@ public class ContextCUDA implements Closeable {
             return null;
         }
         return newDeviceArray;
-    }
-
-    public void setArray(Pointer a, int value, int size) {
-        JCuda.cudaMemset(a, 0, size);
     }
 
     public void free(Pointer pointer) {
