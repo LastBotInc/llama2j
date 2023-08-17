@@ -13,6 +13,5 @@
     <orderEntry type="library" name="it.unimi.dsi.dsiutils" level="project" />
     <orderEntry type="library" name="jcuda" level="project" />
     <orderEntry type="library" name="jcuda.natives" level="project" />
-    <orderEntry type="library" name="jcuda.jcublas" level="project" />
   </component>
 </module>
