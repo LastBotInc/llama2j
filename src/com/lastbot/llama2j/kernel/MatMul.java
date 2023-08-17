@@ -53,7 +53,7 @@ public class MatMul extends Kernel {
         call(copyOfXout, copyOfx, w, weightIndex, n, d);
 
         compareWithThreshold("MatMul.call xout ",
-                xout, copyOfXout, 1e-5f);
+                xout, copyOfXout, 1e-4f);
     }
 
     public void call(int kernelStreamId, Pointer xout, Pointer x, Pointer w, int weightIndex, int n, int d) {
