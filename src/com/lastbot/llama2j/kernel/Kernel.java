@@ -18,6 +18,8 @@ import static jcuda.runtime.JCuda.cudaGetErrorString;
 import static jcuda.runtime.cudaError.cudaSuccess;
 
 public abstract class Kernel {
+    protected final boolean SYNC_KERNEL_CALLS = true;
+
     protected final ContextCUDA cuda;
 
     protected final String name;
