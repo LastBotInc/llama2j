@@ -1,5 +1,8 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="llama2_7b.bin" type="Application" factoryName="Application">
+    <envs>
+      <env name="CUDA_HOME" value="/usr/local/cuda/" />
+    </envs>
     <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
     <module name="llama2j" />
     <option name="PROGRAM_PARAMETERS" value="--checkpoint llama2_7b.bin --gpuMem &quot;17,24,24,24&quot;" />
