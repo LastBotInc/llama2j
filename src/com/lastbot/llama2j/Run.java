@@ -18,7 +18,6 @@ import jcuda.Sizeof;
 
 import java.io.File;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 
 import static java.lang.Math.abs;
@@ -26,8 +25,7 @@ import static jcuda.runtime.JCuda.cudaMemcpy;
 import static jcuda.runtime.cudaMemcpyKind.cudaMemcpyDeviceToDevice;
 
 public class Run {
-    private static final boolean USE_CPU = true;
-    private static final boolean USE_CUDA = true;
+    private static final Mode DEFAULT_MODE = Mode.CUDA;
 
     private static final String MODELS_DIRECTORY = "models";
 
@@ -99,16 +97,13 @@ public class Run {
         }
     }
 
-    private static void transformer(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
-        boolean cpu = context.cpu != null;
-        boolean cuda = context.cudas != null && context.cudas.length > 0;
-        if (cpu) {
-            transformerCPU(token, pos, p, s, w, context);
-//            transformerTest(token, pos, p, s, w, context);
+    private static void transformer(int token, int pos, Mode mode, Config p, RunState s,
+                                    TransformerWeights w, Context context) {
+        switch (mode) {
+            case CPU -> transformerCPU(token, pos, p, s, w, context);
+            case CUDA -> transformerCUDA(token, pos, p, s, w, context);
+            case TEST -> transformerTest(token, pos, p, s, w, context);
         }
-//        if (cuda) {
-//            transformerCUDA(token, pos, p, s, w, context);
-//        }
     }
 
     private static void transformerCPU(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
@@ -120,9 +115,6 @@ public class Run {
         final int hidden_dim = p.hidden_dim;
         final int head_size = dim / p.n_heads;
 
-        int cudaIndex = 0;
-        ContextCUDA cuda = context.cudas[cudaIndex];
-
         // copy the token embedding into x
         System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
 
@@ -131,16 +123,9 @@ public class Run {
 
         // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
-            // hand over to the next device
-            if (l > context.layerAllocation.lastLayer[cudaIndex]) {
-                cudaIndex++;
-                ContextCUDA newCuda = context.cudas[cudaIndex];
-                cuda = newCuda;
-            }
-
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            MemSetFloat.call(s.tmp1, 0f, 1);
+            MemZeroFloat.call(s.tmp1, 0, 1);
             SumOfSquares.call(s.tmp1, s.x, dim);
             WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
@@ -178,7 +163,7 @@ public class Run {
 //                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
                     int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
 
-                    MemSetFloat.call(s.tmp2, 0f, 1);
+                    MemZeroFloat.call(s.tmp2, 0, 1);
                     Attention.call(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
                     // save the score to the attention buffer
                     s.att[attentionIndex + t] = s.tmp2[0];
@@ -188,11 +173,11 @@ public class Run {
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                MemSetFloat.call(s.tmp1, 0f, 1);
+                MemZeroFloat.call(s.tmp1, 0, 1);
                 FindMax.call(s.tmp1, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
-                MemSetFloat.call(s.tmp2, 0f, 1);
+                MemZeroFloat.call(s.tmp2, 0, 1);
                 ExpAndSum.call(s.tmp2, s.att, s.tmp1, attentionIndex, pos + 1);
 
                 // normalize
@@ -200,18 +185,11 @@ public class Run {
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
-                Arrays.fill(s.xb, xbIndex, xbIndex + head_size, 0f);
+                MemZeroFloat.call(s.xb, xbIndex, head_size);
 
-                for (int t = 0; t <= pos; t++) {
-                    // get the value vector for this head and at this timestep
-                    int vIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
-                    // get the attention weight for this timestep
-                    float a = s.att[attentionIndex + t];
-                    // accumulate the weighted value into xb
-                    for (int i = 0; i < head_size; i++) {
-                        s.xb[xbIndex + i] += a * s.l_value_cache[vIndex + i];
-                    }
-                }
+                int valueBase = loff + (h / kv_mul) * head_size;
+                AccumWeightedValue.call(s.xb, s.att, s.l_value_cache, pos, xbIndex,
+                        valueBase, head_size, kv_dim, attentionIndex);
             }
 
             // final matmul to get the output of the attention
@@ -222,7 +200,7 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            MemSetFloat.call(s.tmp1, 0f, 1);
+            MemZeroFloat.call(s.tmp1, 0, 1);
             SumOfSquares.call(s.tmp1, s.x, dim);
             WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
@@ -232,14 +210,18 @@ public class Run {
             matmul(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
 
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
-            for (int i = 0; i < hidden_dim; i++) {
-                s.hb[i] = s.hb[i] * (float) (1.0f / (1.0f + Math.exp((-s.hb[i]))));
-            }
-
             // elementwise multiply with w3(x)
-            for (int i = 0; i < hidden_dim; i++) {
-                s.hb[i] = s.hb[i] * s.hb2[i];
-            }
+            Silu.call(s.hb, s.hb2, hidden_dim);
+
+//            // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
+//            for (int i = 0; i < hidden_dim; i++) {
+//                s.hb[i] = s.hb[i] * (float) (1.0f / (1.0f + Math.exp((-s.hb[i]))));
+//            }
+//
+//            // elementwise multiply with w3(x)
+//            for (int i = 0; i < hidden_dim; i++) {
+//                s.hb[i] = s.hb[i] * s.hb2[i];
+//            }
 
             // final matmul to get the output of the ffn
             matmul(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
@@ -250,7 +232,7 @@ public class Run {
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        MemSetFloat.call(s.tmp1, 0f, 1);
+        MemZeroFloat.call(s.tmp1, 0, 1);
         SumOfSquares.call(s.tmp1, s.x, dim);
         WeightNormalizeAndScale.call(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
@@ -287,7 +269,7 @@ public class Run {
 
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            cuda.memSetFloat.test(s.tmp1, 0f, 1);
+            cuda.memZeroFloat.test(s.tmp1, 0, 1);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
             cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
@@ -325,7 +307,7 @@ public class Run {
 //                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
                     int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
 
-                    cuda.memSetFloat.test(s.tmp2, 0f, 1);
+                    cuda.memZeroFloat.test(s.tmp2, 0, 1);
                     cuda.attention.test(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
                     // save the score to the attention buffer
                     s.att[attentionIndex + t] = s.tmp2[0];
@@ -335,11 +317,11 @@ public class Run {
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                cuda.memSetFloat.test(s.tmp1, 0f, 1);
+                cuda.memZeroFloat.test(s.tmp1, 0, 1);
                 cuda.findMax.test(s.tmp1, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
-                cuda.memSetFloat.test(s.tmp2, 0f, 1);
+                cuda.memZeroFloat.test(s.tmp2, 0, 1);
                 cuda.expAndSum.test(s.tmp2, s.att, s.tmp1, attentionIndex, pos + 1);
 
                 // normalize
@@ -347,18 +329,11 @@ public class Run {
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
-                Arrays.fill(s.xb, xbIndex, xbIndex + head_size, 0f);
+                cuda.memZeroFloat.test(s.xb, xbIndex, head_size);
 
-                for (int t = 0; t <= pos; t++) {
-                    // get the value vector for this head and at this timestep
-                    int vIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
-                    // get the attention weight for this timestep
-                    float a = s.att[attentionIndex + t];
-                    // accumulate the weighted value into xb
-                    for (int i = 0; i < head_size; i++) {
-                        s.xb[xbIndex + i] += a * s.l_value_cache[vIndex + i];
-                    }
-                }
+                int valueBase = loff + (h / kv_mul) * head_size;
+                cuda.accumWeightedValue.test(s.xb, s.att, s.l_value_cache, pos, xbIndex,
+                        valueBase, head_size, kv_dim, attentionIndex);
             }
 
             // final matmul to get the output of the attention
@@ -369,7 +344,7 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            cuda.memSetFloat.test(s.tmp1, 0f, 1);
+            cuda.memZeroFloat.test(s.tmp1, 0, 1);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
             cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
@@ -379,14 +354,7 @@ public class Run {
             cuda.matMul.test(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
 
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
-            for (int i = 0; i < hidden_dim; i++) {
-                s.hb[i] = s.hb[i] * (float) (1.0f / (1.0f + Math.exp((-s.hb[i]))));
-            }
-
-            // elementwise multiply with w3(x)
-            for (int i = 0; i < hidden_dim; i++) {
-                s.hb[i] = s.hb[i] * s.hb2[i];
-            }
+            cuda.silu.test(s.hb, s.hb2, hidden_dim);
 
             // final matmul to get the output of the ffn
             cuda.matMul.test(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
@@ -397,7 +365,7 @@ public class Run {
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        cuda.memSetFloat.test(s.tmp1, 0f, 1);
+        cuda.memZeroFloat.test(s.tmp1, 0, 1);
         cuda.sumOfSquares.test(s.tmp1, s.x, dim);
         cuda.weightNormalizeAndScale.test(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
@@ -414,30 +382,49 @@ public class Run {
         final int hidden_dim = p.hidden_dim;
         final int head_size = dim / p.n_heads;
 
-        int cudaIndex = 0;
-        ContextCUDA cuda = context.cudas[cudaIndex];
+        int dev = 0;
+        ContextCUDA cuda = context.cudas[dev];
         cuda.setDevice();
 
-        Pointer xCU = s.xCU[cudaIndex];
-        Pointer xbCU = s.xbCU[cudaIndex];
-        Pointer xb2CU = s.xb2CU[cudaIndex];
-        Pointer hbCU = s.hbCU[cudaIndex];
-        Pointer hb2CU = s.hb2CU[cudaIndex];
-        Pointer qCU = s.qCU[cudaIndex];
-        Pointer kCU = s.kCU[cudaIndex];
-        Pointer vCU = s.vCU[cudaIndex];
-        Pointer attCU = s.attCU[cudaIndex];
-        Pointer logitsCU = s.logitsCU[cudaIndex];
+        // use first device state variables
 
-        Pointer l_key_cacheCU = s.l_key_cacheCU[cudaIndex];
-        Pointer l_value_cacheCU = s.l_value_cacheCU[cudaIndex];
+        Pointer xCU = s.xCU[dev];
+        Pointer xbCU = s.xbCU[dev];
+        Pointer xb2CU = s.xb2CU[dev];
+        Pointer hbCU = s.hbCU[dev];
+        Pointer hb2CU = s.hb2CU[dev];
+        Pointer qCU = s.qCU[dev];
+        Pointer kCU = s.kCU[dev];
+        Pointer vCU = s.vCU[dev];
+        Pointer attCU = s.attCU[dev];
+        Pointer logitsCU = s.logitsCU[dev];
 
-        Pointer tmp1CU = s.tmp1CU[cudaIndex];
-        Pointer tmp2CU = s.tmp2CU[cudaIndex];
-        Pointer tmp3CU = s.tmp3CU[cudaIndex];
+        SlicePointer l_key_cacheCU = s.l_key_cacheCU[dev];
+        SlicePointer l_value_cacheCU = s.l_value_cacheCU[dev];
+
+        Pointer tmp1CU = s.tmp1CU[dev];
+        Pointer tmp2CU = s.tmp2CU[dev];
+        Pointer tmp3CU = s.tmp3CU[dev];
+
+        // use first device weight variables
+
+        Pointer token_embedding_tableCU = w.token_embedding_tableCU[dev];
+        SlicePointer l_rms_att_weightCU = w.l_rms_att_weightCU[dev];
+        SlicePointer l_rms_ffn_weightCU = w.l_rms_ffn_weightCU[dev];
+        SlicePointer l_wqCU = w.l_wqCU[dev];
+        SlicePointer l_wkCU = w.l_wkCU[dev];
+        SlicePointer l_wvCU = w.l_wvCU[dev];
+        SlicePointer l_woCU = w.l_woCU[dev];
+        SlicePointer l_w1CU = w.l_w1CU[dev];
+        SlicePointer l_w2CU = w.l_w2CU[dev];
+        SlicePointer l_w3CU = w.l_w3CU[dev];
+        Pointer rms_final_weightCU = w.rms_final_weightCU[dev];
+        Pointer freq_cis_realCU = w.freq_cis_realCU[dev];
+        Pointer freq_cis_imagCU = w.freq_cis_imagCU[dev];
+        Pointer wclsCU = w.wclsCU[dev];
 
         // copy the token embedding into x
-        cudaMemcpy(xCU, w.token_embedding_tableCU.withByteOffset((long) token * dim * Sizeof.FLOAT),
+        cudaMemcpy(xCU, token_embedding_tableCU.withByteOffset((long) token * dim * Sizeof.FLOAT),
                 dim, cudaMemcpyDeviceToDevice);
 
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
@@ -447,72 +434,94 @@ public class Run {
         for (int l = 0; l < p.n_layers; l++) {
             // hand RunState over to the next device
             // todo zzz check which arrays are actually needed, this version copies all except layer dependent
-            if (l > context.layerAllocation.lastLayer[cudaIndex]) {
-                cudaIndex++;
-                ContextCUDA newCuda = context.cudas[cudaIndex];
+            if (l > context.layerAllocation.lastLayer[dev]) {
+                dev++;
+                ContextCUDA newCuda = context.cudas[dev];
 
-                cuda.copyFromDeviceToAnotherDevice(xCU, s.xCU[cudaIndex], newCuda, s.x);
-                cuda.copyFromDeviceToAnotherDevice(xbCU, s.xbCU[cudaIndex], newCuda, s.xb);
-                cuda.copyFromDeviceToAnotherDevice(xb2CU, s.xb2CU[cudaIndex], newCuda, s.xb2);
-                cuda.copyFromDeviceToAnotherDevice(hbCU, s.hbCU[cudaIndex], newCuda, s.hb);
-                cuda.copyFromDeviceToAnotherDevice(hb2CU, s.hb2CU[cudaIndex], newCuda, s.hb2);
-                cuda.copyFromDeviceToAnotherDevice(qCU, s.qCU[cudaIndex], newCuda, s.q);
-                cuda.copyFromDeviceToAnotherDevice(kCU, s.kCU[cudaIndex], newCuda, s.k);
-                cuda.copyFromDeviceToAnotherDevice(vCU, s.vCU[cudaIndex], newCuda, s.v);
-                cuda.copyFromDeviceToAnotherDevice(attCU, s.attCU[cudaIndex], newCuda, s.att);
-                cuda.copyFromDeviceToAnotherDevice(logitsCU, s.logitsCU[cudaIndex], newCuda, s.logits);
+                // copy state from the current device to the new device
+                // do not copy layer specific state that remains in the current device
+                // both source and destination use 0 streamId
 
-                xCU = s.xCU[cudaIndex];
-                xbCU = s.xbCU[cudaIndex];
-                xb2CU = s.xb2CU[cudaIndex];
-                hbCU = s.hbCU[cudaIndex];
-                hb2CU = s.hb2CU[cudaIndex];
-                qCU = s.qCU[cudaIndex];
-                kCU = s.kCU[cudaIndex];
-                vCU = s.vCU[cudaIndex];
-                attCU = s.attCU[cudaIndex];
-                logitsCU = s.logitsCU[cudaIndex];
+                cuda.synchronizeAllStreams();
 
-                l_key_cacheCU = s.l_key_cacheCU[cudaIndex];
-                l_value_cacheCU = s.l_value_cacheCU[cudaIndex];
+                cuda.copyFromDeviceToAnotherDevice(0, xCU, s.xCU[dev], newCuda, 0, s.x);
+                cuda.copyFromDeviceToAnotherDevice(0, xbCU, s.xbCU[dev], newCuda, 0, s.xb);
+                cuda.copyFromDeviceToAnotherDevice(0, xb2CU, s.xb2CU[dev], newCuda, 0, s.xb2);
+                cuda.copyFromDeviceToAnotherDevice(0, hbCU, s.hbCU[dev], newCuda, 0, s.hb);
+                cuda.copyFromDeviceToAnotherDevice(0, hb2CU, s.hb2CU[dev], newCuda, 0, s.hb2);
+                cuda.copyFromDeviceToAnotherDevice(0, qCU, s.qCU[dev], newCuda, 0, s.q);
+                cuda.copyFromDeviceToAnotherDevice(0, kCU, s.kCU[dev], newCuda, 0, s.k);
+                cuda.copyFromDeviceToAnotherDevice(0, vCU, s.vCU[dev], newCuda, 0, s.v);
+                cuda.copyFromDeviceToAnotherDevice(0, attCU, s.attCU[dev], newCuda, 0, s.att);
+                cuda.copyFromDeviceToAnotherDevice(0, logitsCU, s.logitsCU[dev], newCuda, 0, s.logits);
 
-                tmp1CU = s.tmp1CU[cudaIndex];
-                tmp2CU = s.tmp2CU[cudaIndex];
-                tmp3CU = s.tmp3CU[cudaIndex];
+                // roll over to new device state variables
 
-                newCuda.synchronizeTransfer();
+                xCU = s.xCU[dev];
+                xbCU = s.xbCU[dev];
+                xb2CU = s.xb2CU[dev];
+                hbCU = s.hbCU[dev];
+                hb2CU = s.hb2CU[dev];
+                qCU = s.qCU[dev];
+                kCU = s.kCU[dev];
+                vCU = s.vCU[dev];
+                attCU = s.attCU[dev];
+                logitsCU = s.logitsCU[dev];
+
+                l_key_cacheCU = s.l_key_cacheCU[dev];
+                l_value_cacheCU = s.l_value_cacheCU[dev];
+
+                tmp1CU = s.tmp1CU[dev];
+                tmp2CU = s.tmp2CU[dev];
+                tmp3CU = s.tmp3CU[dev];
+
+                // roll over to new device weight variables (no need to copy anything)
+
+                token_embedding_tableCU = w.token_embedding_tableCU[dev];
+                l_rms_att_weightCU = w.l_rms_att_weightCU[dev];
+                l_rms_ffn_weightCU = w.l_rms_ffn_weightCU[dev];
+                l_wqCU = w.l_wqCU[dev];
+                l_wkCU = w.l_wkCU[dev];
+                l_wvCU = w.l_wvCU[dev];
+                l_woCU = w.l_woCU[dev];
+                l_w1CU = w.l_w1CU[dev];
+                l_w2CU = w.l_w2CU[dev];
+                l_w3CU = w.l_w3CU[dev];
+                rms_final_weightCU = w.rms_final_weightCU[dev];
+                freq_cis_realCU = w.freq_cis_realCU[dev];
+                freq_cis_imagCU = w.freq_cis_imagCU[dev];
+                wclsCU = w.wclsCU[dev];
+
+                newCuda.synchronizeStream(0);
                 cuda = newCuda;
             }
 
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
 
-            cuda.memSetFloat.call(0, tmp1CU, 0f, 1);
+            cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
+            cuda.synchronizeStream(0);
             cuda.weightNormalizeAndScale.call(
-                    0, xbCU, xCU, w.l_rms_att_weightCU, l * dim, tmp1CU, dim);
+                    0, xbCU, xCU, l_rms_att_weightCU.withIndex(l * dim), tmp1CU, dim);
 
             // qkv matmuls for this position
-            cuda.matMul.call(0, qCU, xbCU, w.l_wqCU, l * dim * dim, dim, dim);
-            cuda.matMul.call(0, kCU, xbCU, w.l_wkCU, l * dim * kv_dim, dim, kv_dim);
-            cuda.matMul.call(0, vCU, xbCU, w.l_wvCU, l * dim * kv_dim, dim, kv_dim);
+            cuda.matMul.call(0, qCU, xbCU, l_wqCU.withIndex(l * dim * dim), dim, dim);
+            cuda.matMul.call(0, kCU, xbCU, l_wkCU.withIndex(l * dim * kv_dim), dim, kv_dim);
+            cuda.matMul.call(0, vCU, xbCU, l_wvCU.withIndex(l * dim * kv_dim), dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
-            cuda.applyRope.call(0, qCU, kCU, w.freq_cis_realCU, w.freq_cis_imagCU,
+            cuda.applyRope.call(0, qCU, kCU, freq_cis_realCU, freq_cis_imagCU,
                     dim, kv_dim, head_size, freq_cis_imag_row);
-
-            cuda.synchronizeKernel(0);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
 
-            int byteOffset = (loff + pos * kv_dim) * Sizeof.FLOAT;
-
 //            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
-            cuda.copyFromDeviceToDevice(kCU, l_key_cacheCU.withByteOffset(byteOffset), kv_dim);
+            cuda.copyBytesFromDeviceToDevice(0, kCU, l_key_cacheCU.withIndex(loff + pos * kv_dim), kv_dim);
 
 //            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
-            cuda.copyFromDeviceToDevice(vCU, l_value_cacheCU.withByteOffset(byteOffset), kv_dim);
+            cuda.copyBytesFromDeviceToDevice(0, vCU, l_value_cacheCU.withIndex(loff + pos * kv_dim), kv_dim);
 
             // multihead attention. iterate over all heads
             int h;
@@ -529,88 +538,72 @@ public class Run {
 //                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
                     int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
                     // calculate the attention score as the dot product of q and k
-                    float score = 0.0f;
-                    for (int i = 0; i < head_size; i++) {
-                        score += s.q[queryIndex + i] * s.l_key_cache[keyIndex + i];
-                    }
-                    score /= (float) Math.sqrt(head_size);
+                    cuda.memZeroFloat.call(0, tmp2CU, 0, 1);
+                    cuda.attention.call(0, tmp2CU, qCU, l_key_cacheCU.withIndex(keyIndex),
+                            queryIndex, head_size);
                     // save the score to the attention buffer
-                    s.att[attentionIndex + t] = score;
+                    cuda.copyFloatsFromDeviceToDeviceInStream(0, tmp2CU, 0, attCU,
+                            attentionIndex + t, Sizeof.FLOAT);
                 }
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                float[] max = {0f};
-                cuda.findMax.test(max, s.att, attentionIndex, pos + 1);
+                cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
+                cuda.findMax.call(0, tmp1CU, attCU, attentionIndex, pos + 1);
 
                 // exp and sum
-                float[] sum = {0f};
-                cuda.expAndSum.test(sum, s.att, max, attentionIndex, pos + 1);
+                cuda.memZeroFloat.call(0, tmp2CU, 0, 1);
+                cuda.expAndSum.call(0, tmp2CU, attCU, tmp1CU, attentionIndex, pos + 1);
 
                 // normalize
-                cuda.normalize.test(s.att, sum, attentionIndex, pos + 1);
+                cuda.normalize.call(0, attCU, tmp2CU, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
-                Arrays.fill(s.xb, xbIndex, xbIndex + head_size, 0f);
+                cuda.memZeroFloat.call(0, xbCU, xbIndex, head_size);
 
-                for (int t = 0; t <= pos; t++) {
-                    // get the value vector for this head and at this timestep
-                    int vIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
-                    // get the attention weight for this timestep
-                    float a = s.att[attentionIndex + t];
-                    // accumulate the weighted value into xb
-                    for (int i = 0; i < head_size; i++) {
-                        s.xb[xbIndex + i] += a * s.l_value_cache[vIndex + i];
-                    }
-                }
+                int valueBase = loff + (h / kv_mul) * head_size;
+                cuda.accumWeightedValue.call(0, xbCU, attCU, l_value_cacheCU, pos, xbIndex,
+                        valueBase, head_size, kv_dim, attentionIndex);
             }
 
             // final matmul to get the output of the attention
-            cuda.matMul.test(s.xb2, s.xb, w.l_wo, l * dim * dim, dim, dim);
+            cuda.matMul.call(0, xb2CU, xbCU, l_woCU, l * dim * dim, dim, dim);
             // residual connection back into x
-            cuda.accum.test(s.x, s.xb2, dim);
+            cuda.accum.call(0, xCU, xb2CU, dim);
 
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            cuda.sumOfSquares.test(s.tmp1, s.x, dim);
-            cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
+            cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
+            cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
+            cuda.weightNormalizeAndScale.call(0, xbCU, xCU, l_rms_ffn_weightCU, l * dim, tmp1CU, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            cuda.matMul.test(s.hb, s.xb, w.l_w1, l * dim * hidden_dim, dim, hidden_dim);
-            cuda.matMul.test(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.call(0, hbCU, xbCU, l_w1CU, l * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.call(0, hb2CU, xbCU, l_w3CU, l * dim * hidden_dim, dim, hidden_dim);
 
-            // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
-            for (int i = 0; i < hidden_dim; i++) {
-                s.hb[i] = s.hb[i] * (float) (1.0f / (1.0f + Math.exp((-s.hb[i]))));
-            }
-
-            // elementwise multiply with w3(x)
-            for (int i = 0; i < hidden_dim; i++) {
-                s.hb[i] = s.hb[i] * s.hb2[i];
-            }
+            cuda.silu.call(0, hbCU, hb2CU, hidden_dim);
 
             // final matmul to get the output of the ffn
-            cuda.matMul.test(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
+            cuda.matMul.call(0, xbCU, hbCU, l_w2CU, l * dim * hidden_dim, hidden_dim, dim);
 
             // residual connection
-            cuda.accum.test(s.x, s.xb, dim);
+            cuda.accum.call(0, xCU, xbCU, dim);
         } // layers
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        cuda.sumOfSquares.test(s.tmp1, s.x, dim);
-        cuda.weightNormalizeAndScale.test(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
+        cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
+        cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
+        cuda.weightNormalizeAndScale.call(0, xCU, xCU, rms_final_weightCU, 0, tmp1CU, dim);
 
         // classifier into logits
-        cuda.matMul.test(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+        cuda.matMul.call(0, logitsCU, xCU, wclsCU, 0, p.dim, p.vocab_size);
     }
-
-// ----------------------------------------------------------------------------
 
 // ----------------------------------------------------------------------------
 // utilities
@@ -625,12 +618,12 @@ public class Run {
     public static void main(String[] args) {
         CommandLine commandLine = new CommandLine(args);
 
+        Mode mode = DEFAULT_MODE;
+
         Long rngSeed = commandLine.getSeed();
         if (rngSeed == null) {
             rngSeed = time();
         }
-
-        Target target = new Target(USE_CPU, USE_CUDA);
 
         Config config = new Config();
         TransformerWeights weights = null;
@@ -661,7 +654,7 @@ public class Run {
 
             LLogger.info(config.toString());
 
-            layerAllocation = new LayerAllocation(commandLine.getGpuMem(), config, target, shared_weights);
+            layerAllocation = new LayerAllocation(commandLine.getGpuMem(), config, mode, shared_weights);
 
             context = new Context(layerAllocation);
 
@@ -696,7 +689,7 @@ public class Run {
 
         while (pos < steps) {
             // forward the transformer to get logits for the next token
-            transformer(token, pos, config, state, weights, context);
+            transformer(token, pos, mode, config, state, weights, context);
 
             // advance the state machine
             if (pos < prompt_tokens.length) {
