@@ -39,7 +39,7 @@ public class ExpAndSum extends Kernel {
     public void test(float[] sum, float[] x, float[] maxValue, int index, int size) {
         float[] copyOfSum = Arrays.copyOf(sum, sum.length);
         float[] copyOfx = Arrays.copyOf(x, x.length);
-        Pointer pSum = cuda.allocateAndCopyToDevice(x, false);
+        Pointer pSum = cuda.allocateAndCopyToDevice(sum, false);
         Pointer px = cuda.allocateAndCopyToDevice(x, false);
         Pointer pMaxValue = cuda.allocateAndCopyToDevice(maxValue, false);
         cuda.synchronizeTransfer();
@@ -84,6 +84,9 @@ public class ExpAndSum extends Kernel {
                     sharedMemory, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
             ));
+            if (SYNC_KERNEL_CALLS) {
+                cuda.synchronizeKernel(kernelStreamId);
+            }
         } else if (size <= LARGE_KERNEL) {
             int threadsPerBlock = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
@@ -108,6 +111,9 @@ public class ExpAndSum extends Kernel {
                         sharedMemory, stream,  // Shared memory size and stream
                         kernelParameters, null // Kernel- and extra parameters
                 ));
+                if (SYNC_KERNEL_CALLS) {
+                    cuda.synchronizeKernel(kernelStreamId);
+                }
             }
 //            cuda.synchronizeKernel(kernelStreamId);
             // reduction
@@ -128,6 +134,9 @@ public class ExpAndSum extends Kernel {
                         sharedMemory, stream,  // Shared memory size and stream
                         kernelParameters, null // Kernel- and extra parameters
                 ));
+                if (SYNC_KERNEL_CALLS) {
+                    cuda.synchronizeKernel(kernelStreamId);
+                }
             }
             cuda.free(blockSum);
         } else {
@@ -158,7 +167,7 @@ public class ExpAndSum extends Kernel {
 
                         // Block-wise reduction
                         for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                            if (threadIdx.x < stride) {
+                            if (tid < stride && (threadIdx.x + stride) < blockDim.x) {
                                 sdata[threadIdx.x] += sdata[threadIdx.x + stride];
                             }
                             __syncthreads();  // Ensure all threads in block are in sync after each step
@@ -196,7 +205,7 @@ public class ExpAndSum extends Kernel {
                             
                         // Block-wise reduction
                         for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                            if (threadIdx.x < stride) {
+                            if (threadIdx.x < stride && (threadIdx.x + stride) < blockDim.x) {
                                 sdata[threadIdx.x] += sdata[threadIdx.x + stride];
                             }
                             __syncthreads();
@@ -230,7 +239,7 @@ public class ExpAndSum extends Kernel {
                             
                         // Block-wise reduction
                         for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                            if (tid < stride) {
+                            if (tid < stride && (threadIdx.x + stride) < blockDim.x) {
                                 sdata[tid] += sdata[tid + stride];
                             }
                             __syncthreads();
