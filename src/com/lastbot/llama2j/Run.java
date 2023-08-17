@@ -103,8 +103,8 @@ public class Run {
         boolean cpu = context.cpu != null;
         boolean cuda = context.cudas != null && context.cudas.length > 0;
         if (cpu) {
-//            transformerCPU(token, pos, p, s, w, context);
-            transformerTest(token, pos, p, s, w, context);
+            transformerCPU(token, pos, p, s, w, context);
+//            transformerTest(token, pos, p, s, w, context);
         }
 //        if (cuda) {
 //            transformerCUDA(token, pos, p, s, w, context);
@@ -129,8 +129,6 @@ public class Run {
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         int freq_cis_imag_row = pos * head_size / 2;
 
-        float[] ss = new float[1];
-
         // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
             // hand over to the next device
@@ -142,11 +140,9 @@ public class Run {
 
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            ss[0] = 0;
-            SumOfSquares.call(ss, s.x, dim);
-            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_att_weight, l * dim, ss, dim);
-
-            // zzz matmul( -> cuda.matMul.test(
+            MemSetFloat.call(s.tmp1, 0f, 1);
+            SumOfSquares.call(s.tmp1, s.x, dim);
+            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
             // qkv matmuls for this position
             matmul(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
@@ -182,44 +178,25 @@ public class Run {
 //                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
                     int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
 
-                    s.tmp1[0] = 0;
-                    Attention.call(s.tmp1, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
+                    MemSetFloat.call(s.tmp2, 0f, 1);
+                    Attention.call(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
                     // save the score to the attention buffer
-                    s.att[attentionIndex + t] = s.tmp1[0];
-
-                    // calculate the attention score as the dot product of q and k
-                    float score = 0.0f;
-                    for (int i = 0; i < head_size; i++) {
-                        score += s.q[queryIndex + i] * s.l_key_cache[keyIndex + i];
-                    }
-                    score /= (float) Math.sqrt(head_size);
-
-                    if (Math.abs(s.tmp1[0] - score) > 1e-5) {
-                        LLogger.error("s.tmp1[0] " + s.tmp1[0] + ", score" + score);
-                    }
-//                    // calculate the attention score as the dot product of q and k
-//                    float score = 0.0f;
-//                    for (int i = 0; i < head_size; i++) {
-//                        score += s.q[queryIndex + i] * s.l_key_cache[keyIndex + i];
-//                    }
-//                    score /= (float) Math.sqrt(head_size);
-//                    // save the score to the attention buffer
-//                    s.att[attentionIndex + t] = score;
+                    s.att[attentionIndex + t] = s.tmp2[0];
                 }
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                float[] max = {0f};
-                FindMax.call(max, s.att, attentionIndex, pos + 1);
+                MemSetFloat.call(s.tmp1, 0f, 1);
+                FindMax.call(s.tmp1, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
-                float[] sum = {0f};
-                ExpAndSum.call(sum, s.att, max, attentionIndex, pos + 1);
+                MemSetFloat.call(s.tmp2, 0f, 1);
+                ExpAndSum.call(s.tmp2, s.att, s.tmp1, attentionIndex, pos + 1);
 
                 // normalize
-                Normalize.call(s.att, sum, attentionIndex, pos + 1);
+                Normalize.call(s.att, s.tmp2, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
@@ -245,9 +222,9 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            ss[0] = 0f;
-            SumOfSquares.call(ss, s.x, dim);
-            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_ffn_weight, l * dim, ss, dim);
+            MemSetFloat.call(s.tmp1, 0f, 1);
+            SumOfSquares.call(s.tmp1, s.x, dim);
+            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
@@ -273,9 +250,9 @@ public class Run {
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        ss[0] = 0f;
-        SumOfSquares.call(ss, s.x, dim);
-        WeightNormalizeAndScale.call(s.x, s.x, w.rms_final_weight, 0, ss, dim);
+        MemSetFloat.call(s.tmp1, 0f, 1);
+        SumOfSquares.call(s.tmp1, s.x, dim);
+        WeightNormalizeAndScale.call(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
         // classifier into logits
         matmul(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
