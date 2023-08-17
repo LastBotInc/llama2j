@@ -77,6 +77,9 @@ public class SumOfSquares extends Kernel {
                     sharedMemory, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
             ));
+            if (SYNC_KERNEL_CALLS) {
+                cuda.synchronizeKernel(kernelStreamId);
+            }
         } else if (size <= LARGE_KERNEL) {
             int threadsPerBlock = 1024;
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
@@ -99,8 +102,10 @@ public class SumOfSquares extends Kernel {
                         sharedMemory, stream,  // Shared memory size and stream
                         kernelParameters, null // Kernel- and extra parameters
                 ));
+                if (SYNC_KERNEL_CALLS) {
+                    cuda.synchronizeKernel(kernelStreamId);
+                }
             }
-//            cuda.synchronizeKernel(kernelStreamId);
             // reduction
             {
                 int blockSizeX = findNextPowerOf2(blocksPerGrid);
@@ -120,6 +125,9 @@ public class SumOfSquares extends Kernel {
                         sharedMemory, stream,  // Shared memory size and stream
                         kernelParameters, null // Kernel- and extra parameters
                 ));
+                if (SYNC_KERNEL_CALLS) {
+                    cuda.synchronizeKernel(kernelStreamId);
+                }
             }
             cuda.free(blockSum);
         } else {
@@ -145,7 +153,7 @@ public class SumOfSquares extends Kernel {
 
                         // Block-wise reduction
                         for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                            if (threadIdx.x < stride) {
+                            if (threadIdx.x < stride && (threadIdx.x + stride) < blockDim.x) {
                                 sdata[tid] += sdata[tid + stride];
                             }
                             __syncthreads();  // Ensure all threads in block are in sync after each step
@@ -184,7 +192,7 @@ public class SumOfSquares extends Kernel {
                                     
                                 // Block-wise reduction
                                 for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                    if (threadIdx.x < stride) {
+                                    if (threadIdx.x < stride && (threadIdx.x + stride) < blockDim.x) {
                                         sdata[threadIdx.x] += sdata[threadIdx.x + stride];
                                     }
                                     __syncthreads();
@@ -218,7 +226,7 @@ public class SumOfSquares extends Kernel {
                                     
                                 // Block-wise reduction
                                 for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                    if (tid < stride) {
+                                    if (tid < stride && (threadIdx.x + stride) < blockDim.x) {
                                         sdata[tid] += sdata[tid + stride];
                                     }
                                     __syncthreads();
