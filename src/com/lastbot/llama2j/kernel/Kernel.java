@@ -14,6 +14,8 @@ import java.util.Map;
 
 import static jcuda.driver.JCudaDriver.cuModuleGetFunction;
 import static jcuda.driver.JCudaDriver.cuModuleLoad;
+import static jcuda.runtime.JCuda.cudaGetErrorString;
+import static jcuda.runtime.cudaError.cudaSuccess;
 
 public abstract class Kernel {
     protected final ContextCUDA cuda;
@@ -26,8 +28,8 @@ public abstract class Kernel {
     private static final String CUDA_SOURCE_EXTENSION = ".cu";
     private static final String CUBIN_EXTENSION = ".cubin";
 
-//    private static final String CUDA_DIR = "/usr/local/cuda";
-    private static final String CUDA_DIR = "/usr/local/cuda-12.2";
+//    private static final String CUDA_DIR = "/usr/local/cuda-12.2";
+    private static final String CUDA_DIR = "/usr/local/cuda-12.0";
     private static final String NVCC_PATH = CUDA_DIR + File.separator + "bin" + File.separator + "nvcc";
     private static final String CUDA_ARCHITECTURE = "compute_89";
     private static final String CUDA_CODE = "sm_89";
@@ -166,6 +168,16 @@ public abstract class Kernel {
             LLogger.error("Compare " + function + " total of " + String.format("%,d", errors) + " out of " +
                     String.format("%,d", length) + " maxDiff " + maxDiff);
         }
+    }
+
+    protected boolean isError(int result) {
+        if (result != cudaSuccess) {
+            String errorMessage = cudaGetErrorString(result);
+            LLogger.error("CUDA error on kernel " + name + " with code " + result + "\n" +
+                    errorMessage);
+            return true;
+        }
+        return false;
     }
 
     protected static int findNextPowerOf2(int n) {
