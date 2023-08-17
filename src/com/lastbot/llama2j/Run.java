@@ -15,12 +15,11 @@ See file upstream.txt for details on the commit that this version is synchronize
 import com.lastbot.llama2j.kernel.*;
 import jcuda.Pointer;
 import jcuda.Sizeof;
-import jcuda.runtime.JCuda;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.concurrent.*;
+import java.util.concurrent.CountDownLatch;
 
 import static java.lang.Math.abs;
 import static jcuda.runtime.JCuda.cudaMemcpy;
@@ -311,7 +310,7 @@ public class Run {
 
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            s.tmp1[0] = 0;
+            cuda.memSetFloat.test(s.tmp1, 0f, 1);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
             cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
@@ -349,7 +348,7 @@ public class Run {
 //                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
                     int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
 
-                    s.tmp2[0] = 0;
+                    cuda.memSetFloat.test(s.tmp2, 0f, 1);
                     cuda.attention.test(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
                     // save the score to the attention buffer
                     s.att[attentionIndex + t] = s.tmp2[0];
@@ -359,15 +358,15 @@ public class Run {
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                float[] max = {0f};
-                cuda.findMax.test(max, s.att, attentionIndex, pos + 1);
+                cuda.memSetFloat.test(s.tmp1, 0f, 1);
+                cuda.findMax.test(s.tmp1, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
-                float[] sum = {0f};
-                cuda.expAndSum.test(sum, s.att, max, attentionIndex, pos + 1);
+                cuda.memSetFloat.test(s.tmp2, 0f, 1);
+                cuda.expAndSum.test(s.tmp2, s.att, s.tmp1, attentionIndex, pos + 1);
 
                 // normalize
-                cuda.normalize.test(s.att, sum, attentionIndex, pos + 1);
+                cuda.normalize.test(s.att, s.tmp2, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
@@ -393,7 +392,7 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            s.tmp1[0] = 0;
+            cuda.memSetFloat.test(s.tmp1, 0f, 1);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
             cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
@@ -421,7 +420,7 @@ public class Run {
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        s.tmp1[0] = 0;
+        cuda.memSetFloat.test(s.tmp1, 0f, 1);
         cuda.sumOfSquares.test(s.tmp1, s.x, dim);
         cuda.weightNormalizeAndScale.test(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
@@ -511,7 +510,7 @@ public class Run {
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
 
-            cuda.setArray(tmp1CU, 0, Sizeof.FLOAT);
+            cuda.memSetFloat.call(0, tmp1CU, 0f, 1);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
             cuda.weightNormalizeAndScale.call(
                     0, xbCU, xCU, w.l_rms_att_weightCU, l * dim, tmp1CU, dim);
