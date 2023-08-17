@@ -72,9 +72,9 @@ public class ApplyRope extends Kernel {
 
     public void call(int kernelStreamId, Pointer q, Pointer k, Pointer freq_cis_real, Pointer freq_cis_imag,
                      int dim, int kv_dim, int head_size, int freq_cis_imag_row) {
-//        __global__ void applyRope(    float *q, float *k,
-//                                      const float *freq_cis_real, const float *freq_cis_imag,
-//                                      int dim, int head_size, int freq_cis_imag_row)
+//        __global__ void applyRope(float *q, float *k,
+//                                  const float *freq_cis_real, const float *freq_cis_imag,
+//                                  int dim, int kv_dim, int head_size, int freq_cis_imag_row)
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(q),
                 Pointer.to(k),
@@ -87,18 +87,18 @@ public class ApplyRope extends Kernel {
         );
 
         // choose larger dimension
-        int halfDim = Math.max(dim / 2, kv_dim / 2);
+        int maxDim = Math.max(dim, kv_dim);
 
-        int blockSizeX = Math.min(findNextPowerOf2(halfDim), MAX_THREADS_PER_BLOCK);
+        int blockSizeX = Math.min(findNextPowerOf2(maxDim), MAX_THREADS_PER_BLOCK);
 
-        int gridSizeX = (int) Math.ceil((double) halfDim / blockSizeX);
+        int gridSizeX = (int) Math.ceil((double) maxDim / blockSizeX);
 
-        cuLaunchKernel(kernel,
+        isError(cuLaunchKernel(kernel,
                 gridSizeX, 1, 1,          // Grid dimension
                 blockSizeX, 1, 1,      // Block dimension
                 0, cuda.getCUKernelStream(kernelStreamId),  // Shared memory size and stream
                 kernelParameters, null // Kernel- and extra parameters
-        );
+        ));
     }
 
     private CUfunction create() {
@@ -110,14 +110,18 @@ public class ApplyRope extends Kernel {
                             int dim, int kv_dim, int head_size, int freq_cis_imag_row)
                             {
                                 // process elements in steps of 2
-                                int i = 2 * (blockIdx.x * blockDim.x + threadIdx.x);
-                             
+                                int i = blockIdx.x * blockDim.x + threadIdx.x;
+                                
+                                if (i % 2 != 0) {
+                                    return;
+                                }
+
                                 int freq_cis_imag_index = freq_cis_imag_row + (i % head_size) / 2;
                                 float fcr = freq_cis_real[freq_cis_imag_index];
                                 float fci = freq_cis_imag[freq_cis_imag_index];
 
                                 // Ensure we don't go out of bounds
-                                if (i < dim) {
+                                if (i < dim - 1) {
                                     float q0 = q[i];
                                     float q1 = q[i + 1];
                                     q[i] = q0 * fcr - q1 * fci;
@@ -125,7 +129,7 @@ public class ApplyRope extends Kernel {
                                 }
 
                                 // Ensure we don't go out of bounds
-                                if (i < kv_dim) {
+                                if (i < kv_dim - 1) {
                                     float k0 = k[i];
                                     float k1 = k[i + 1];
                                     k[i] = k0 * fcr - k1 * fci;
