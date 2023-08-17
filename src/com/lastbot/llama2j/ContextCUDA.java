@@ -18,18 +18,21 @@ import static jcuda.runtime.cudaError.cudaSuccess;
 import static jcuda.runtime.cudaMemcpyKind.*;
 
 public class ContextCUDA implements Closeable {
-    private static final int KERNEL_STREAM_COUNT = 3;
+    public static final int STREAM_COUNT = 16;
+    public static final int TEST_STREAM = STREAM_COUNT - 1;
 
     // optimized kernels for transformer
     public final Accum accum;
+    public final AccumWeightedValue accumWeightedValue;
     public final ApplyRope applyRope;
     public final Attention attention;
     public final ExpAndSum expAndSum;
     public final FindMax findMax;
     public final SumOfSquares sumOfSquares;
     public final MatMul matMul;
-    public final MemSetFloat memSetFloat;
+    public final MemZeroFloat memZeroFloat;
     public final Normalize normalize;
+    public final Silu silu;
     public final WeightNormalizeAndScale weightNormalizeAndScale;
 
     static {
@@ -40,10 +43,8 @@ public class ContextCUDA implements Closeable {
     private final String name;
     private final int deviceId; // device id
     private final List<Pointer> memoryPointerList = new ArrayList<>();
-    private final cudaStream_t transferStream;
-    private final CUstream CUTransferStream;
-    private final cudaStream_t[] kernelStreams = new cudaStream_t[KERNEL_STREAM_COUNT];
-    private final CUstream[] CUKernelStreams = new CUstream[KERNEL_STREAM_COUNT];
+    private final cudaStream_t[] streams = new cudaStream_t[STREAM_COUNT];
+    private final CUstream[] CUKernelStreams = new CUstream[STREAM_COUNT];
 
     public ContextCUDA(String name, int deviceId) throws IOException {
         this.name = name;
@@ -51,29 +52,25 @@ public class ContextCUDA implements Closeable {
 
         setDevice();
 
-        this.transferStream = new cudaStream_t();
-        if (isError(cudaStreamCreate(transferStream))) {
-            throw new RuntimeException();
-        }
-        this.CUTransferStream = new CUstream(transferStream);
-
-        for (int k = 0; k < KERNEL_STREAM_COUNT; k++) {
-            this.kernelStreams[k] = new cudaStream_t();
-            if (isError(cudaStreamCreate(kernelStreams[k]))) {
+        for (int k = 0; k < STREAM_COUNT; k++) {
+            this.streams[k] = new cudaStream_t();
+            if (isError(cudaStreamCreate(streams[k]))) {
                 throw new RuntimeException();
             }
-            this.CUKernelStreams[k] = new CUstream(kernelStreams[k]);
+            this.CUKernelStreams[k] = new CUstream(streams[k]);
         }
 
         this.accum = new Accum(this);
+        this.accumWeightedValue = new AccumWeightedValue(this);
         this.applyRope = new ApplyRope(this);
         this.attention = new Attention(this);
         this.expAndSum = new ExpAndSum(this);
         this.findMax = new FindMax(this);
         this.sumOfSquares = new SumOfSquares(this);
         this.matMul = new MatMul(this);
-        this.memSetFloat = new MemSetFloat(this);
+        this.memZeroFloat = new MemZeroFloat(this);
         this.normalize = new Normalize(this);
+        this.silu = new Silu(this);
         this.weightNormalizeAndScale = new WeightNormalizeAndScale(this);
     }
 
@@ -83,7 +80,7 @@ public class ContextCUDA implements Closeable {
         }
     }
 
-    public Pointer allocateAndCopyToDevice(float[] hostArray, boolean autoFree) {
+    public Pointer allocateAndCopyToDevice(int streamId, float[] hostArray, boolean autoFree) {
         Pointer targetDeviceArray = allocateFloatArray(hostArray.length, autoFree);
 
         long byteSize = (long) hostArray.length * Sizeof.FLOAT;
@@ -92,27 +89,32 @@ public class ContextCUDA implements Closeable {
 
         // Asynchronous copy from host to device
         if (isError(cudaMemcpyAsync(targetDeviceArray, Pointer.to(hostArray), byteSize,
-                cudaMemcpyHostToDevice, transferStream))) {
+                cudaMemcpyHostToDevice, streams[streamId]))) {
             return null;
         }
         return targetDeviceArray;
     }
 
-    public Pointer allocateAndCopyToDeviceWithOffset(float[] hostArray, int offset, int size, boolean autoFree) {
+
+    public SlicePointer allocateSliceAndCopyToDevice(int streamId, float[] hostArray, int floatOffset,
+                                                     int size, boolean autoFree) {
         Pointer targetDeviceArray = allocateFloatArray(size, autoFree);
 
-        Pointer hostArrayOffset = Pointer.to(hostArray).withByteOffset((long) offset * Float.BYTES);
+        long byteOffset = (long) floatOffset * Float.BYTES;
+
+        Pointer hostArrayWithOffset = Pointer.to(hostArray).withByteOffset(byteOffset);
 
         long byteSize = (long) (size) * Sizeof.FLOAT;
 
         setDevice();
 
         // Asynchronous copy from host to device
-        if (isError(cudaMemcpyAsync(targetDeviceArray, hostArrayOffset, byteSize,
-                cudaMemcpyHostToDevice, transferStream))) {
+        if (isError(cudaMemcpyAsync(targetDeviceArray, hostArrayWithOffset, byteSize,
+                cudaMemcpyHostToDevice, streams[streamId]))) {
             return null;
         }
-        return targetDeviceArray;
+        SlicePointer slicePointer = new SlicePointer(targetDeviceArray, floatOffset, byteOffset, byteSize);
+        return slicePointer;
     }
 
     public Pointer allocateFloatArray(long elements, boolean autoFree) {
@@ -135,6 +137,36 @@ public class ContextCUDA implements Closeable {
         }
     }
 
+    public static SlicePointer allocateAndCopyLayers(int streamId, ContextCUDA cu, float[] cpuArray,
+                                                     int firstLayer, int lastLayer, int nLayers) {
+        int floatOffset = layerFloatOffset(cpuArray, firstLayer, nLayers);
+        int floatSize = layerFloatSize(cpuArray, firstLayer, lastLayer, nLayers);
+
+        SlicePointer slicePointer =
+                cu.allocateSliceAndCopyToDevice(streamId, cpuArray, floatOffset, floatSize, true);
+        return slicePointer;
+    }
+
+    private static int layerFloatOffset(float[] cpuArray, int firstLayer, int nLayers) {
+        return layerFloatOffset(cpuArray.length, firstLayer, nLayers);
+    }
+
+    private static int layerFloatSize(float[] cpuArray, int firstLayer, int lastLayer, int nLayers) {
+        return layerFloatSize(cpuArray.length, firstLayer, lastLayer, nLayers);
+    }
+
+    private static int layerFloatOffset(int length, int firstLayer, int nLayers) {
+        int bytesPerLayer = length / nLayers;
+        int offset = firstLayer * bytesPerLayer;
+        return offset;
+    }
+
+    private static int layerFloatSize(int length, int firstLayer, int lastLayer, int nLayers) {
+        int bytesPerLayer = length / nLayers;
+        int size = (lastLayer - firstLayer + 1) * bytesPerLayer;
+        return size;
+    }
+
     public Pointer allocate(long byteSize) {
         setDevice();
 
@@ -150,71 +182,94 @@ public class ContextCUDA implements Closeable {
         isError(cudaFree(pointer));
     }
 
-    public boolean copyFromHostToDevice(float[] sourceHostArray, Pointer targetDeviceArray) {
+    public void memZero(int streamId, Pointer a, int index, int size) {
+        Pointer aWithOffset = index == 0 ? a : a.withByteOffset((long) index * Sizeof.FLOAT);
+        // sets 4 bytes to integer 0, this works because 0.0f is also all bits zero
+        cudaMemsetAsync(aWithOffset, 0, (long) size * Sizeof.FLOAT, streams[streamId]);
+    }
+
+    public void copyFromHostToDevice(int streamId, float[] sourceHostArray, Pointer targetDeviceArray) {
         long byteSize = (long) sourceHostArray.length * Sizeof.FLOAT;
 
         setDevice();
 
         // Asynchronous copy from device to host
-        return !isError(cudaMemcpyAsync(targetDeviceArray, Pointer.to(sourceHostArray),
-                byteSize, cudaMemcpyHostToDevice, transferStream));
+        isError(cudaMemcpyAsync(targetDeviceArray, Pointer.to(sourceHostArray),
+                byteSize, cudaMemcpyHostToDevice, streams[streamId]));
     }
 
-    public boolean copyFromDeviceToHost(Pointer sourceDeviceArray, float[] targetHostArray) {
+    public void copyFromDeviceToHost(int streamId, Pointer sourceDeviceArray, float[] targetHostArray) {
         long byteSize = (long) targetHostArray.length * Sizeof.FLOAT;
 
         setDevice();
 
         // Asynchronous copy from device to host
-        return !isError(cudaMemcpyAsync(Pointer.to(targetHostArray),
-                sourceDeviceArray, byteSize, cudaMemcpyDeviceToHost, transferStream));
+        isError(cudaMemcpyAsync(Pointer.to(targetHostArray),
+                sourceDeviceArray, byteSize, cudaMemcpyDeviceToHost, streams[streamId]));
     }
 
-    public boolean copyFromDeviceToDevice(Pointer sourceDeviceArray, Pointer targetDeviceArray, long byteSize) {
+    public void copyFloatsFromDeviceToDeviceInStream(int streamId, Pointer sourceDeviceArray, long sourceIndex,
+                                                     Pointer targetDeviceArray, long targetIndex,
+                                                     long floatSize) {
+        copyBytesFromDeviceToDeviceInStream(streamId, sourceDeviceArray, sourceIndex * Sizeof.FLOAT,
+                targetDeviceArray, targetIndex * Sizeof.FLOAT, floatSize * Sizeof.FLOAT);
+    }
+
+    public void copyBytesFromDeviceToDeviceInStream(int streamId, Pointer sourceDeviceArray, long sourceOffset,
+                                                    Pointer targetDeviceArray, long targetOffset,
+                                                    long byteSize) {
+        setDevice();
+
+        Pointer source = sourceOffset == 0 ? sourceDeviceArray : sourceDeviceArray.withByteOffset(sourceOffset);
+        Pointer target = targetOffset == 0 ? targetDeviceArray : targetDeviceArray.withByteOffset(targetOffset);
+
+        // Asynchronous copy from device to device
+        isError(cudaMemcpyAsync(source, target, byteSize,
+                cudaMemcpyDeviceToDevice, streams[streamId]));
+    }
+
+    public void copyBytesFromDeviceToDevice(int streamId, Pointer sourceDeviceArray, Pointer targetDeviceArray,
+                                            long byteSize) {
         setDevice();
 
         // Asynchronous copy from device to host
-        return !isError(cudaMemcpyAsync(sourceDeviceArray, targetDeviceArray, byteSize, cudaMemcpyDeviceToDevice, transferStream));
+        isError(cudaMemcpyAsync(sourceDeviceArray, targetDeviceArray, byteSize,
+                cudaMemcpyDeviceToDevice, streams[streamId]));
     }
 
-    public boolean copyFromDeviceToAnotherDevice(Pointer sourceDeviceArray, Pointer targetDeviceArray,
-                                                 ContextCUDA targetContext, float[] hostArray) {
+    public void copyFromDeviceToAnotherDevice(int sourceStreamId, Pointer sourceDeviceArray, Pointer targetDeviceArray,
+                                              ContextCUDA targetContext, int targetStreamId, float[] hostArray) {
         setDevice();
 
-        if (copyFromDeviceToHost(sourceDeviceArray, hostArray)) {
-            synchronize(transferStream);
-            return targetContext.copyFromHostToDevice(hostArray, targetDeviceArray);
+        copyFromDeviceToHost(sourceStreamId, sourceDeviceArray, hostArray);
+        synchronizeStream(sourceStreamId);
+        targetContext.copyFromHostToDevice(targetStreamId, hostArray, targetDeviceArray);
+    }
+
+    public void synchronizeAllStreams() {
+        setDevice();
+        for (int streamId = 0; streamId < STREAM_COUNT; streamId++) {
+            synchronizeStream(streamId);
         }
-        return false;
     }
 
-    public boolean synchronizeTransfer() {
-        return synchronize(transferStream);
-    }
-
-    public void synchronizeKernel(int k) {
+    public void synchronizeStream(int streamId) {
         setDevice();
         try {
-            if (isError(cudaStreamSynchronize(kernelStreams[k]))) {
-                LLogger.error("synchronizeKernel isError");
-                throw new RuntimeException("synchronizeKernel " + k + " failed");
+            if (isError(cudaStreamSynchronize(streams[streamId]))) {
+                throw new RuntimeException("synchronizeStream " + streamId + " failed");
             }
         } catch (CudaException e) {
-            LLogger.error("synchronizeKernel CudaException", e);
+            throw new RuntimeException("synchronizeStream CudaException", e);
         }
-    }
-
-    private boolean synchronize(cudaStream_t stream) {
-        setDevice();
-        return !isError(cudaStreamSynchronize(stream));
     }
 
     private boolean isError(int result) {
         if (result != cudaSuccess) {
             String errorMessage = cudaGetErrorString(result);
-            LLogger.error("CUDA error on context " + name + " with code " + result + "\n" +
-                    errorMessage);
-            return true;
+            String msg = "CUDA error on context " + name + " with code " + result + "\n" +
+                    errorMessage;
+            throw new RuntimeException(msg);
         }
         return false;
     }
@@ -238,7 +293,7 @@ public class ContextCUDA implements Closeable {
             t1 = System.currentTimeMillis();
             Pointer d1Pointer = context0.allocateFloatArray(TEST_SIZE, true);
             t1b = System.currentTimeMillis();
-            context0.copyFromHostToDevice(d1, d1Pointer);
+            context0.copyFromHostToDevice(0, d1, d1Pointer);
 
             t2 = System.currentTimeMillis();
             Pointer d2Pointer = context1.allocateFloatArray(TEST_SIZE, true);
@@ -246,49 +301,46 @@ public class ContextCUDA implements Closeable {
 
             if (d1Pointer != null) {
                 if (d2Pointer != null) {
-                    if (context0.synchronizeTransfer()) {
-                        t4 = System.currentTimeMillis();
-                        if (context0.copyFromDeviceToAnotherDevice(d1Pointer, d2Pointer, context1, temp)) {
-                            t5 = System.currentTimeMillis();
-                            if (context1.synchronizeTransfer()) {
-                                t6 = System.currentTimeMillis();
-                                if (context1.copyFromDeviceToHost(d2Pointer, d2)) {
-                                    t7 = System.currentTimeMillis();
-                                    int errorCount = 0;
-                                    for (int i = 0; i < TEST_SIZE; i++) {
-                                        if (d1[i] != d2[i]) {
-                                            LLogger.error(i + "d1 " + d1[i] + ", d2 " + d2[i]);
-                                            errorCount++;
-                                        }
-                                    }
-                                    double gigabytes = ((double) TEST_SIZE * Float.BYTES) / 1024 / 1024 / 1024;
-
-                                    LLogger.info(String.format("%,.0f", gigabytes) + " GB");
-
-                                    LLogger.time("allocateFloatArray", t1, t1b);
-                                    LLogger.time("allocateAndCopyToDevice", t1b, t2);
-                                    LLogger.info("host to device " + String.format("%,.1f",
-                                            (gigabytes / ((t2 - t1b) / 1000D))) + " GB per second");
-
-                                    LLogger.time("allocateFloatArray", t2, t3);
-                                    LLogger.time("context0.synchronizeTransfer", t3, t4);
-                                    LLogger.time("context0.copyFromDeviceToAnotherDevice", t4, t5);
-                                    LLogger.info("device to device " + String.format("%,.1f",
-                                            (gigabytes / ((t5 - t4) / 1000D))) + " GB per second");
-
-                                    LLogger.time("context1.synchronizeTransfer()", t5, t6);
-                                    LLogger.time("context1.copyFromDeviceToHost", t6, t7);
-
-                                    if (errorCount == 0) {
-                                        LLogger.info("Success");
-                                    } else {
-                                        LLogger.info("Failure with " + String.format("%,d", errorCount) + " errors");
-                                    }
-                                    return;
-                                }
-                            }
+                    context0.synchronizeStream(0);
+                    t4 = System.currentTimeMillis();
+                    context0.copyFromDeviceToAnotherDevice(0, d1Pointer, d2Pointer,
+                            context1, 1, temp);
+                    t5 = System.currentTimeMillis();
+                    context1.synchronizeStream(1);
+                    t6 = System.currentTimeMillis();
+                    context1.copyFromDeviceToHost(1, d2Pointer, d2);
+                    t7 = System.currentTimeMillis();
+                    int errorCount = 0;
+                    for (int i = 0; i < TEST_SIZE; i++) {
+                        if (d1[i] != d2[i]) {
+                            LLogger.error(i + "d1 " + d1[i] + ", d2 " + d2[i]);
+                            errorCount++;
                         }
                     }
+                    double gigabytes = ((double) TEST_SIZE * Float.BYTES) / 1024 / 1024 / 1024;
+
+                    LLogger.info(String.format("%,.0f", gigabytes) + " GB");
+
+                    LLogger.time("allocateFloatArray", t1, t1b);
+                    LLogger.time("allocateAndCopyToDevice", t1b, t2);
+                    LLogger.info("host to device " + String.format("%,.1f",
+                            (gigabytes / ((t2 - t1b) / 1000D))) + " GB per second");
+
+                    LLogger.time("allocateFloatArray", t2, t3);
+                    LLogger.time("context0.synchronizeTransfer", t3, t4);
+                    LLogger.time("context0.copyFromDeviceToAnotherDevice", t4, t5);
+                    LLogger.info("device to device " + String.format("%,.1f",
+                            (gigabytes / ((t5 - t4) / 1000D))) + " GB per second");
+
+                    LLogger.time("context1.synchronizeTransfer()", t5, t6);
+                    LLogger.time("context1.copyFromDeviceToHost", t6, t7);
+
+                    if (errorCount == 0) {
+                        LLogger.info("Success");
+                    } else {
+                        LLogger.info("Failure with " + String.format("%,d", errorCount) + " errors");
+                    }
+                    return;
                 }
             }
         } catch (IOException e) {
@@ -300,18 +352,6 @@ public class ContextCUDA implements Closeable {
     public static void main(String[] args) {
         test();
         test();
-    }
-
-    public cudaStream_t getTransferStream() {
-        return transferStream;
-    }
-
-    public CUstream getCUTransferStream() {
-        return CUTransferStream;
-    }
-
-    public cudaStream_t getKernelStream(int k) {
-        return kernelStreams[k];
     }
 
     public CUstream getCUKernelStream(int k) {
@@ -328,8 +368,7 @@ public class ContextCUDA implements Closeable {
         }
 
         // Destroy the CUDA streams
-        cudaStreamDestroy(transferStream);
-        for (cudaStream_t kernelStream : kernelStreams) {
+        for (cudaStream_t kernelStream : streams) {
             cudaStreamDestroy(kernelStream);
         }
     }
