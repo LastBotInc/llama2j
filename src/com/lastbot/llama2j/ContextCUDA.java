@@ -5,9 +5,6 @@ import jcuda.CudaException;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUstream;
-import jcuda.jcublas.JCublas;
-import jcuda.jcublas.JCublas2;
-import jcuda.jcublas.cublasHandle;
 import jcuda.runtime.JCuda;
 import jcuda.runtime.cudaStream_t;
 
@@ -37,13 +34,11 @@ public class ContextCUDA implements Closeable {
     static {
         // Initialize the JCuda driver API
         JCuda.setExceptionsEnabled(true);
-        JCublas.cublasInit();
     }
 
     private final String name;
     private final int deviceId; // device id
     private final List<Pointer> memoryPointerList = new ArrayList<>();
-    private final List<cublasHandle> cublasHandleList = new ArrayList<>();
     private final cudaStream_t transferStream;
     private final CUstream CUTransferStream;
     private final cudaStream_t[] kernelStreams = new cudaStream_t[KERNEL_STREAM_COUNT];
@@ -78,24 +73,6 @@ public class ContextCUDA implements Closeable {
         this.matMul = new MatMul(this);
         this.normalize = new Normalize(this);
         this.weightNormalizeAndScale = new WeightNormalizeAndScale(this);
-    }
-
-    public cublasHandle[] createCublasHandles() {
-        setDevice();
-        cublasHandle[] handles = new cublasHandle[ContextCUDA.KERNEL_STREAM_COUNT];
-        for (int i = 0; i < KERNEL_STREAM_COUNT; i++) {
-            cublasHandle handle = new cublasHandle();
-            if (isError(JCublas2.cublasCreate(handle))) {
-                throw new RuntimeException("Cannot create cublasHandle");
-            }
-            if (isError(JCublas2.cublasSetStream(handle, kernelStreams[i]))) {
-                throw new RuntimeException("Cannot set cublasHandle stream");
-            }
-            cublasHandleList.add(handle);
-            handles[i] = handle;
-//            LLogger.debug("Device " + deviceId + " handle " + i + " = " + handle);
-        }
-        return handles;
     }
 
     public void setDevice() {
@@ -167,6 +144,10 @@ public class ContextCUDA implements Closeable {
         return newDeviceArray;
     }
 
+    public void setArray(Pointer a, int value, int size) {
+        JCuda.cudaMemset(a, 0, size);
+    }
+
     public void free(Pointer pointer) {
         isError(cudaFree(pointer));
     }
@@ -220,8 +201,7 @@ public class ContextCUDA implements Closeable {
                 LLogger.error("synchronizeKernel isError");
                 throw new RuntimeException("synchronizeKernel " + k + " failed");
             }
-        }
-        catch (CudaException e) {
+        } catch (CudaException e) {
             LLogger.error("synchronizeKernel CudaException", e);
         }
     }
@@ -344,10 +324,6 @@ public class ContextCUDA implements Closeable {
     public void close() {
         LLogger.debug("Closing context " + name);
         setDevice();
-
-        for (cublasHandle handle : cublasHandleList) {
-            JCublas2.cublasDestroy(handle);
-        }
 
         for (Pointer pointer : memoryPointerList) {
             cudaFree(pointer);
