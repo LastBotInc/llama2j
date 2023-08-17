@@ -56,8 +56,8 @@ public class RunState implements Closeable {
     Pointer[] vCU;
     Pointer[] attCU;
     Pointer[] logitsCU;
-    Pointer[] l_key_cacheCU;
-    Pointer[] l_value_cacheCU;
+    SlicePointer[] l_key_cacheCU;
+    SlicePointer[] l_value_cacheCU;
     Pointer[] tmp1CU;
     Pointer[] tmp2CU;
     Pointer[] tmp3CU;
@@ -134,8 +134,8 @@ public class RunState implements Closeable {
             vCU = new Pointer[n];
             attCU = new Pointer[n];
             logitsCU = new Pointer[n];
-            l_key_cacheCU = new Pointer[n];
-            l_value_cacheCU = new Pointer[n];
+            l_key_cacheCU = new SlicePointer[n];
+            l_value_cacheCU = new SlicePointer[n];
             tmp1CU = new Pointer[n];
             tmp2CU = new Pointer[n];
             tmp3CU = new Pointer[n];
@@ -156,11 +156,17 @@ public class RunState implements Closeable {
                 attCU[dev] = cu.allocateFloatArray((long) p.n_heads * p.seq_len, true);
                 logitsCU[dev] = cu.allocateFloatArray(p.vocab_size, true);
 
+                long layerFloatSize = ((long) p.seq_len * kv_dim);
+                long floatOffset = firstLayer * layerFloatSize;
+                long byteOffset = floatOffset * Sizeof.FLOAT;
                 int nLayers = lastLayer - firstLayer + 1;
-                int lengthOfLayerData = nLayers * (p.seq_len * kv_dim);
+                long floatSize = nLayers * layerFloatSize;
+                long byteSize = floatSize * Sizeof.FLOAT;
 
-                l_key_cacheCU[dev] = cu.allocateFloatArray(lengthOfLayerData, true);
-                l_value_cacheCU[dev] = cu.allocateFloatArray(lengthOfLayerData, true);
+                l_key_cacheCU[dev] = new SlicePointer(cu.allocateFloatArray(floatSize, true),
+                        floatOffset, byteOffset, byteSize);
+                l_value_cacheCU[dev] = new SlicePointer(cu.allocateFloatArray(floatSize, true),
+                        floatOffset, byteOffset, byteSize);
 
                 tmp1CU[dev] = cu.allocateFloatArray(1, true);
                 tmp2CU[dev] = cu.allocateFloatArray(1, true);
