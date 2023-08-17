@@ -1,6 +1,7 @@
 package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
+import com.lastbot.llama2j.SlicePointer;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUfunction;
@@ -38,14 +39,14 @@ public class MatMul extends Kernel {
         call(xout, x, w, weightIndex, n, d);
         float[] copyOfXout = Arrays.copyOf(xout, xout.length);
         float[] copyOfx = Arrays.copyOf(x, x.length);
-        Pointer pXout = cuda.allocateAndCopyToDevice(xout, false);
-        Pointer px = cuda.allocateAndCopyToDevice(x, false);
-        Pointer pw = cuda.allocateAndCopyToDevice(w, false);
-        cuda.synchronizeTransfer();
-        call(0, pXout, px, pw, weightIndex, n, d);
-        cuda.synchronizeKernel(0);
-        cuda.copyFromDeviceToHost(pXout, xout);
-        cuda.synchronizeTransfer();
+        Pointer pXout = cuda.allocateAndCopyToDevice(TEST_STREAM, xout, false);
+        Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
+        Pointer pw = cuda.allocateAndCopyToDevice(TEST_STREAM, w, false);
+        cuda.synchronizeStream(TEST_STREAM);
+        call(TEST_STREAM, pXout, px, pw, weightIndex, n, d);
+        cuda.synchronizeStream(TEST_STREAM);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pXout, xout);
+        cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pXout);
         cuda.free(px);
         cuda.free(pw);
@@ -56,18 +57,26 @@ public class MatMul extends Kernel {
                 xout, copyOfXout, 1e-4f);
     }
 
-    public void call(int kernelStreamId, Pointer xout, Pointer x, Pointer w, int weightIndex, int n, int d) {
-        CUstream stream = cuda.getCUKernelStream(kernelStreamId);
+    public void call(int streamId, Pointer xout, Pointer x, SlicePointer w, int weightIndex, int n, int d) {
+        Pointer wIndexed = w.withIndex(weightIndex);
+        call(streamId, xout, x, wIndexed, n, d);
+    }
+
+    public void call(int streamId, Pointer xout, Pointer x, Pointer w, int weightIndex, int n, int d) {
+        Pointer wIndexed = w.withByteOffset((long) weightIndex * Sizeof.FLOAT);
+        call(streamId, xout, x, wIndexed, n, d);
+    }
+
+    public void call(int streamId, Pointer xout, Pointer x, Pointer w, int n, int d) {
+        CUstream stream = cuda.getCUKernelStream(streamId);
         int blockSizeX = Math.min(findNextPowerOf2(d), MAX_THREADS_PER_BLOCK);
         int gridSizeX = (int) Math.ceil((double) d / blockSizeX);
 
 //        __global__ void matMul(float* xout, float* x, float* w, int n, int d) {
-        Pointer wIndexed = w.withByteOffset((long) weightIndex * Sizeof.FLOAT);
-
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(xout),
                 Pointer.to(x),
-                Pointer.to(wIndexed),
+                Pointer.to(w),
                 Pointer.to(new int[]{n}),
                 Pointer.to(new int[]{d})
         );
@@ -79,7 +88,7 @@ public class MatMul extends Kernel {
                 kernelParameters, null // Kernel- and extra parameters
         ));
         if (SYNC_KERNEL_CALLS) {
-            cuda.synchronizeKernel(kernelStreamId);
+            cuda.synchronizeStream(streamId);
         }
     }
 
