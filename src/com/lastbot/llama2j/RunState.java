@@ -166,8 +166,14 @@ public class RunState implements Closeable {
                 tmp2CU[dev] = cu.allocateFloatArray(1, true);
                 tmp3CU[dev] = cu.allocateFloatArray(1, true);
 
-//                l_key_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
-//                l_value_cacheCU = cu.allocateFloatArray((long) config.n_layers * config.seq_len * config.dim);
+                if (xCU[dev] == null || xbCU[dev] == null || xb2CU[dev] == null || hbCU[dev] == null ||
+                        hb2CU[dev] == null || qCU[dev] == null || kCU[dev] == null || vCU[dev] == null ||
+                        attCU[dev] == null || logitsCU[dev] == null ||
+                        l_key_cacheCU[dev] == null || l_value_cacheCU[dev] == null ||
+                        tmp1CU[dev] == null || tmp2CU[dev] == null ||tmp3CU[dev] == null) {
+                    LLogger.error("Failed to allocate CUDA memory on device " + dev);
+                    throw new RuntimeException();
+                }
             }
             long t3 = System.currentTimeMillis();
             LLogger.time("Create RunState CUDA", t2, t3);
