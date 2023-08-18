@@ -2,15 +2,12 @@ package com.lastbot.llama2j;
 
 import com.lastbot.llama2j.kernel.*;
 import jcuda.Pointer;
-import jcuda.Sizeof;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.concurrent.CountDownLatch;
 
 import static java.lang.Math.abs;
-import static jcuda.runtime.JCuda.cudaMemcpy;
-import static jcuda.runtime.cudaMemcpyKind.cudaMemcpyDeviceToDevice;
 
 /*
 Inference for Llama-2 Transformer model in pure Java and with optional CUDA.
@@ -24,7 +21,7 @@ See file upstream.txt for details on the commit that this version is synchronize
 
 */
 public class Run {
-    private static final Mode DEFAULT_MODE = Mode.CPU;
+    private static final Mode DEFAULT_MODE = Mode.CUDA;
     public static final int THREAD_COUNT = 32;
 
     private static final String MODELS_DIRECTORY = "models";
@@ -422,8 +419,8 @@ public class Run {
         Pointer wclsCU = w.wclsCU[dev];
 
         // copy the token embedding into x
-        cudaMemcpy(xCU, token_embedding_tableCU.withByteOffset((long) token * dim * Sizeof.FLOAT),
-                dim, cudaMemcpyDeviceToDevice);
+        cuda.copyFloatsFromDeviceToDeviceInStream(0, token_embedding_tableCU, token * dim,
+                xCU, 0, dim);
 
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         int freq_cis_imag_row = pos * head_size / 2;
@@ -541,7 +538,7 @@ public class Run {
                             queryIndex, head_size);
                     // save the score to the attention buffer
                     cuda.copyFloatsFromDeviceToDeviceInStream(0, tmp2CU, 0, attCU,
-                            attentionIndex + t, Sizeof.FLOAT);
+                            attentionIndex + t, 1);
                 }
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
