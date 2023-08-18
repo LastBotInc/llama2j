@@ -8,23 +8,6 @@ import java.io.Closeable;
 public class RunState implements Closeable {
     private static final int TMP_ARRAY_SIZE = 1024 * 1024;
 
-    // struct used when sorting probabilities during top-p sampling, CPU only
-    public static class ProbIndex implements Comparable<ProbIndex> {
-        public float prob;
-        public int index;
-
-        @Override
-        public int compareTo(ProbIndex o) {
-            if (prob > o.prob) {
-                return -1;
-            } else if (prob < o.prob) {
-                return 1;
-            } else {
-                return 0;
-            }
-        }
-    }
-
     // current wave of activations
     float[] x; // activation at current time stamp (dim,)
     float[] xb; // same, but inside a residual branch (dim,)
@@ -42,8 +25,6 @@ public class RunState implements Closeable {
     // kv cache
     float[] l_key_cache;   // (layer, seq_len, dim)
     float[] l_value_cache; // (layer, seq_len, dim)
-
-    ProbIndex[] probIndex; // buffer used in top-p sampling, CPU only
 
     Pointer[] xCU;
     Pointer[] xbCU;
@@ -103,11 +84,6 @@ public class RunState implements Closeable {
         logits = c.cpu.allocateFloatArray(p.vocab_size);
         tmp1 = c.cpu.allocateFloatArray(1);
         tmp2 = c.cpu.allocateFloatArray(1);
-
-        probIndex = new ProbIndex[p.vocab_size];
-        for (int i = 0; i < p.vocab_size; i++) {
-            probIndex[i] = new ProbIndex();
-        }
 
         l_key_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
         l_value_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
