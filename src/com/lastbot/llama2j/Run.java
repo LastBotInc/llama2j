@@ -1,17 +1,5 @@
 package com.lastbot.llama2j;
 
-/*
-Inference for Llama-2 Transformer model in pure Java and with optional CUDA.
-
-Objectives: reasonable (among the world's fastest) latency, with the absolutely leading
-best throughput on systems with one or multiple NVIDIA gaming GPUs such as 4090.
-
-Adapted from and inspired by: :https://github.com/karpathy/llama2.c
-
-See file upstream.txt for details on the commit that this version is synchronized with.
-
-*/
-
 import com.lastbot.llama2j.kernel.*;
 import jcuda.Pointer;
 import jcuda.Sizeof;
@@ -24,8 +12,20 @@ import static java.lang.Math.abs;
 import static jcuda.runtime.JCuda.cudaMemcpy;
 import static jcuda.runtime.cudaMemcpyKind.cudaMemcpyDeviceToDevice;
 
+/*
+Inference for Llama-2 Transformer model in pure Java and with optional CUDA.
+
+Objectives: reasonable (among the world's fastest) latency, with the absolutely leading
+best throughput on systems with one or multiple NVIDIA gaming GPUs such as 4090.
+
+Adapted from and inspired by: :https://github.com/karpathy/llama2.c
+
+See file upstream.txt for details on the commit that this version is synchronized with.
+
+*/
 public class Run {
-    private static final Mode DEFAULT_MODE = Mode.CUDA;
+    private static final Mode DEFAULT_MODE = Mode.CPU;
+    public static final int THREAD_COUNT = 32;
 
     private static final String MODELS_DIRECTORY = "models";
 
@@ -55,8 +55,6 @@ public class Run {
 //        // normalize
 //        normalize(sum, x, index, size);
 //    }
-
-    private static final int THREAD_COUNT = 32;
 
     /**
      * This function is left here as a special case to make the testing with CPU only faster, as 99% of
@@ -625,8 +623,8 @@ public class Run {
             rngSeed = time();
         }
 
-        Config config = new Config();
-        TransformerWeights weights = null;
+        Config p = new Config();
+        TransformerWeights w = null;
 
         Sampler sampler = new Sampler(rngSeed);
 
@@ -634,36 +632,36 @@ public class Run {
         long startModelRead = time();
         LLogger.info("Start reading checkpoint " + commandLine.getCheckpoint());
 
-        LayerAllocation layerAllocation;
+        LayerAllocation layerAllocation = null;
         Context context = null;
 
         try (BinFileReader reader =
                      new BinFileReader(MODELS_DIRECTORY + File.separator + commandLine.getCheckpoint())) {
             // read in the config header
-            config.dim = reader.nextInt(); // transformer dimension
-            config.hidden_dim = reader.nextInt(); // for ffn layers
-            config.n_layers = reader.nextInt(); // number of layers
-            config.n_heads = reader.nextInt(); // number of query heads
-            config.n_kv_heads = reader.nextInt(); // number of key/value heads (can be < query heads because of multiquery)
-            config.vocab_size = reader.nextInt(); // vocabulary size, usually 256 (byte-level)
-            config.seq_len = reader.nextInt(); // max sequence length
+            p.dim = reader.nextInt(); // transformer dimension
+            p.hidden_dim = reader.nextInt(); // for ffn layers
+            p.n_layers = reader.nextInt(); // number of layers
+            p.n_heads = reader.nextInt(); // number of query heads
+            p.n_kv_heads = reader.nextInt(); // number of key/value heads (can be < query heads because of multiquery)
+            p.vocab_size = reader.nextInt(); // vocabulary size, usually 256 (byte-level)
+            p.seq_len = reader.nextInt(); // max sequence length
 
             // negative vocab size is hacky way of signaling unshared weights. bit yikes.
-            boolean shared_weights = config.vocab_size > 0;
-            config.vocab_size = abs(config.vocab_size);
+            boolean shared_weights = p.vocab_size > 0;
+            p.vocab_size = abs(p.vocab_size);
 
-            LLogger.info(config.toString());
+            LLogger.info(p.toString());
 
-            layerAllocation = new LayerAllocation(commandLine.getGpuMem(), config, mode, shared_weights);
+            layerAllocation = new LayerAllocation(commandLine.getGpuMem(), p, mode, shared_weights);
 
             context = new Context(layerAllocation);
 
-            weights = new TransformerWeights(context, reader, config, shared_weights);
+            w = new TransformerWeights(context, reader, p, shared_weights);
         } catch (IOException e) {
             System.exit(1);
         }
 
-        RunState state = new RunState(context, config);
+        RunState s = new RunState(context, p);
 
         long endModelRead = time();
 
@@ -671,12 +669,12 @@ public class Run {
 
         int steps = commandLine.getSteps();
         // right now we cannot run for more than config.seq_len steps
-        if (steps <= 0 || steps > config.seq_len) {
-            steps = config.seq_len;
+        if (steps <= 0 || steps > p.seq_len) {
+            steps = p.seq_len;
         }
 
         Tokenizer tokenizer = new Tokenizer(
-                MODELS_DIRECTORY + File.separator + commandLine.getTokenizer(), config.vocab_size);
+                MODELS_DIRECTORY + File.separator + commandLine.getTokenizer(), p.vocab_size);
 
         // process the prompt, if any
         int[] prompt_tokens = tokenizer.bpe_encode(commandLine.getPrompt());
@@ -686,45 +684,54 @@ public class Run {
         int next;        // will store the next token in the sequence
         int token = 1;   // init with token 1 (=BOS), as done in Llama-2 sentencepiece tokenizer
         int pos = 0;     // position in the sequence
+        float[] logits = mode != Mode.CUDA ? s.logits : new float[p.vocab_size];
+
+        int lastDev = layerAllocation.deviceCount - 1;
 
         while (pos < steps) {
             // forward the transformer to get logits for the next token
-            transformer(token, pos, mode, config, state, weights, context);
+            transformer(token, pos, mode, p, s, w, context);
+
+            // if in cuda mode, copy logits from CUDA to CPU
+            if (mode == Mode.CUDA) {
+                context.lastCuda().synchronizeAllStreams();
+                context.lastCuda().copyFromDeviceToHost(0, s.logitsCU[lastDev], logits);
+            }
 
             // advance the state machine
             if (pos < prompt_tokens.length) {
                 // if we are still processing the input prompt, force the next prompt token
                 next = prompt_tokens[pos];
             } else {
-                // sample the next token
+                // sample the next token (in this version, sampling is done on CPU)
                 if (commandLine.getTemperature() == 0.0f) {
                     // greedy argmax sampling: take the token with the highest probability
-                    next = sampler.argmax(state.logits, config.vocab_size);
+                    next = sampler.argmax(logits, p.vocab_size);
                 } else {
                     // apply the temperature to the logits
-                    for (int q = 0; q < config.vocab_size; q++) {
-                        state.logits[q] /= commandLine.getTemperature();
+                    for (int q = 0; q < p.vocab_size; q++) {
+                        s.logits[q] /= commandLine.getTemperature();
                     }
                     // apply softmax to the logits to get the probabilities for next token
 //                    softmax(state.logits, 0, config.vocab_size);
 
                     // find max value (for numerical stability)
                     float[] max = {0f};
-                    context.lastCuda().findMax.test(max, state.logits, 0, config.vocab_size);
+                    FindMax.call(max, s.logits, 0, p.vocab_size);
 
                     // exp and sum
                     float[] sum = {0f};
-                    context.lastCuda().expAndSum.test(sum, state.logits, max, 0, config.vocab_size);
+                    ExpAndSum.call(sum, s.logits, max, 0, p.vocab_size);
 
                     // normalize
-                    context.lastCuda().normalize.test(state.logits, sum, 0, config.vocab_size);
+                    Normalize.call(s.logits, sum, 0, p.vocab_size);
 
                     if (commandLine.getTopp() == null) {
                         // we sample from this distribution to get the next token
-                        next = sampler.sample(state, config.vocab_size);
+                        next = sampler.sample(s, p.vocab_size);
                     } else {
                         // top-p (nucleus) sampling, clamping the least likely tokens to zero
-                        next = sampler.sample_topp(state, config.vocab_size, commandLine.getTopp());
+                        next = sampler.sample_topp(s, p.vocab_size, commandLine.getTopp());
                     }
                 }
             }
@@ -753,7 +760,7 @@ public class Run {
 
         // cleanup, free memory
 
-        state.close();
+        s.close();
 
         context.close();
 
