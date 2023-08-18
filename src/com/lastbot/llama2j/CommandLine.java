@@ -7,6 +7,7 @@ import java.util.Map;
 
 public class CommandLine {
     private static final String CHECKPOINT = "--checkpoint";
+    private static final String MODE = "--mode";
     private static final String TEMP = "--temp";
     private static final String TOPP = "--topp";
     private static final String SEED = "--seed";
@@ -16,6 +17,7 @@ public class CommandLine {
     private static final String TOKENIZER = "--tokenizer";
 
     private final String checkpoint;
+    private Mode mode = Mode.CUDA; // CPU, TEST, CUDA
     private float temperature = 0.9f; // e.g. 1.0, or 0.0
     private Float topp = 0.9f; // e.g. 1.0, or 0.0
     private Long seed = null; // e.g. 12345
@@ -40,6 +42,22 @@ public class CommandLine {
                 System.exit(1);
             } else {
                 LLogger.info(CHECKPOINT + " " + checkpoint);
+            }
+
+            if (arguments.containsKey(MODE)) {
+                String s = arguments.get(MODE);
+                if (s.equalsIgnoreCase("CPU")) {
+                    mode = Mode.CPU;
+                } else if (s.equalsIgnoreCase("TEST")) {
+                    mode = Mode.TEST;
+                } else if (s.equalsIgnoreCase("CUDA")) {
+                    mode = Mode.CUDA;
+                } else {
+                    LLogger.warning("Unknown mode " + MODE + " " + s + ", using default mode");
+                }
+                LLogger.info(MODE + " " + mode);
+            } else {
+                LLogger.info(MODE + " " + mode + " (using default)");
             }
 
             if (arguments.containsKey(TEMP)) {
@@ -113,6 +131,10 @@ public class CommandLine {
 
     public String getCheckpoint() {
         return checkpoint;
+    }
+
+    public Mode getMode() {
+        return mode;
     }
 
     public float getTemperature() {
