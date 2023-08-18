@@ -18,14 +18,15 @@ import static jcuda.runtime.cudaError.cudaSuccess;
 import static jcuda.runtime.cudaMemcpyKind.*;
 
 public class ContextCUDA implements Closeable {
-    public static final int STREAM_COUNT = 16;
-    public static final int TEST_STREAM = STREAM_COUNT - 1;
+    public static final int STREAM_COUNT;
+    public static final int TEST_STREAM;
 
     // optimized kernels for transformer
     public final Accum accum;
     public final AccumWeightedValue accumWeightedValue;
     public final ApplyRope applyRope;
     public final Attention attention;
+    public final AttentionLoop attentionLoop;
     public final ExpAndSum expAndSum;
     public final FindMax findMax;
     public final SumOfSquares sumOfSquares;
@@ -38,6 +39,29 @@ public class ContextCUDA implements Closeable {
     static {
         // Initialize the JCuda driver API
         JCuda.setExceptionsEnabled(true);
+
+        String s = System.getenv("CUDA_DEVICE_MAX_CONNECTIONS");
+        int value;
+        int DEFAULT = 8;
+        if (s != null) {
+            try {
+                value = Integer.parseInt(s.strip());
+                if (value > 2 && value < 32) {
+                    LLogger.info("Using CUDA_DEVICE_MAX_CONNECTIONS " + value);
+                } else {
+                    LLogger.info("Invalid CUDA_DEVICE_MAX_CONNECTIONS " + value + ", using default " + DEFAULT);
+                    value = DEFAULT;
+                }
+            } catch (NumberFormatException e) {
+                LLogger.info("Invalid CUDA_DEVICE_MAX_CONNECTIONS " + s + ", using default " + DEFAULT);
+                value = DEFAULT;
+            }
+        } else {
+            LLogger.info("Using default CUDA_DEVICE_MAX_CONNECTIONS " + DEFAULT);
+            value = DEFAULT;
+        }
+        STREAM_COUNT = value;
+        TEST_STREAM = STREAM_COUNT - 1;
     }
 
     private final String name;
@@ -64,6 +88,7 @@ public class ContextCUDA implements Closeable {
         this.accumWeightedValue = new AccumWeightedValue(this);
         this.applyRope = new ApplyRope(this);
         this.attention = new Attention(this);
+        this.attentionLoop = new AttentionLoop(this);
         this.expAndSum = new ExpAndSum(this);
         this.findMax = new FindMax(this);
         this.sumOfSquares = new SumOfSquares(this);
@@ -216,8 +241,8 @@ public class ContextCUDA implements Closeable {
     }
 
     private void copyBytesFromDeviceToDevice(int streamId, Pointer sourceDeviceArray, long sourceOffset,
-                                            Pointer targetDeviceArray, long targetOffset,
-                                            long byteSize) {
+                                             Pointer targetDeviceArray, long targetOffset,
+                                             long byteSize) {
         setDevice();
 
         Pointer source = sourceOffset == 0 ? sourceDeviceArray : sourceDeviceArray.withByteOffset(sourceOffset);
