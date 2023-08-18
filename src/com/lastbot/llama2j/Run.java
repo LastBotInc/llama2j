@@ -5,7 +5,9 @@ import jcuda.Pointer;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.concurrent.CountDownLatch;
+import java.util.zip.CRC32;
 
 import static java.lang.Math.abs;
 
@@ -21,7 +23,6 @@ See file upstream.txt for details on the commit that this version is synchronize
 
 */
 public class Run {
-    private static final Mode DEFAULT_MODE = Mode.CUDA;
     public static final int THREAD_COUNT = 32;
 
     private static final String MODELS_DIRECTORY = "models";
@@ -122,6 +123,7 @@ public class Run {
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
             MemZeroFloat.call(s.tmp1, 0, 1);
             SumOfSquares.call(s.tmp1, s.x, dim);
+
             WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
             // qkv matmuls for this position
@@ -244,11 +246,14 @@ public class Run {
         final int hidden_dim = p.hidden_dim;
         final int head_size = dim / p.n_heads;
 
-        int cudaIndex = 0;
-        ContextCUDA cuda = context.cudas[cudaIndex];
+        int dev = 0;
+        ContextCUDA cuda = context.cudas[dev];
+        cuda.setDevice();
 
         // copy the token embedding into x
         System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
+
+//        log(pos, "s.x", s.x);
 
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         int freq_cis_imag_row = pos * head_size / 2;
@@ -256,25 +261,42 @@ public class Run {
         // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
             // hand RunState over to the next device
-            if (l > context.layerAllocation.lastLayer[cudaIndex]) {
-                cudaIndex++;
-                ContextCUDA newCuda = context.cudas[cudaIndex];
+            if (l > context.layerAllocation.lastLayer[dev]) {
+                dev++;
+                ContextCUDA newCuda = context.cudas[dev];
                 cuda = newCuda;
+                cuda.setDevice();
             }
 
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
             cuda.memZeroFloat.test(s.tmp1, 0, 1);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
+
+//            if (l == 0) {
+//                summarize(pos, "s.x", s.x);
+//            }
+
             cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
+
+            // zzz ok
+//            log(pos, "s.xb", s.xb);
 
             // qkv matmuls for this position
             cuda.matMul.test(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
+
+            // zzz ok
+//            log(pos, "s.q", s.q);
+
             cuda.matMul.test(s.k, s.xb, w.l_wk, l * dim * kv_dim, dim, kv_dim);
             cuda.matMul.test(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             cuda.applyRope.test(s.q, s.k, w.freq_cis_real, w.freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
+
+            // zzz ok
+//            log(pos, "s.q", s.q);
+//            log(pos, "s.k", s.k);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
@@ -286,6 +308,11 @@ public class Run {
 //            float* value_cache_row = s->value_cache + loff + pos * kv_dim;
 //            memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
             System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
+
+            // zzz ok
+
+//            log(pos, "k", s.k);
+//            log(pos, "c", s.v);
 
             // multihead attention. iterate over all heads
             int h;
@@ -304,6 +331,10 @@ public class Run {
 
                     cuda.memZeroFloat.test(s.tmp2, 0, 1);
                     cuda.attention.test(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
+
+                    // zzz ok
+//                    log(pos, "s.tmp2", s.tmp2);
+
                     // save the score to the attention buffer
                     s.att[attentionIndex + t] = s.tmp2[0];
                 }
@@ -336,6 +367,9 @@ public class Run {
             // residual connection back into x
             cuda.accum.test(s.x, s.xb2, dim);
 
+            // zzz ok
+            // log(pos, "s.x", s.x);
+
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
@@ -356,6 +390,10 @@ public class Run {
 
             // residual connection
             cuda.accum.test(s.x, s.xb, dim);
+
+            // zzz ok
+//            log(pos, "s.x", s.x);
+//            log(pos, "s.xb", s.xb);
         } // layers
 
         // final rmsnorm
@@ -366,6 +404,7 @@ public class Run {
 
         // classifier into logits
         cuda.matMul.test(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+//        log(pos, "s.logits", s.logits);
     }
 
     private static void transformerCUDA(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
@@ -399,7 +438,6 @@ public class Run {
 
         Pointer tmp1CU = s.tmp1CU[dev];
         Pointer tmp2CU = s.tmp2CU[dev];
-        Pointer tmp3CU = s.tmp3CU[dev];
 
         // use first device weight variables
 
@@ -418,14 +456,19 @@ public class Run {
         Pointer freq_cis_imagCU = w.freq_cis_imagCU[dev];
         Pointer wclsCU = w.wclsCU[dev];
 
+//        log(pos, "1 xCU", cuda, xCU, dim);
         // copy the token embedding into x
-        cuda.copyFloatsFromDeviceToDeviceInStream(0, token_embedding_tableCU, token * dim,
+        cuda.copyFloatsFromDeviceToDevice(0, token_embedding_tableCU, token * dim,
                 xCU, 0, dim);
+//        log(pos, "token_embedding_tableCU", cuda, token_embedding_tableCU, (token + 10) * dim);
+
+        // zzz is OK
+//        log(pos, "xCU", cuda, xCU, dim);
 
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         int freq_cis_imag_row = pos * head_size / 2;
 
-        // forward all layers
+        // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
             // hand RunState over to the next device
             // todo zzz check which arrays are actually needed, this version copies all except layer dependent
@@ -468,11 +511,10 @@ public class Run {
 
                 tmp1CU = s.tmp1CU[dev];
                 tmp2CU = s.tmp2CU[dev];
-                tmp3CU = s.tmp3CU[dev];
 
                 // roll over to new device weight variables (no need to copy anything)
 
-                token_embedding_tableCU = w.token_embedding_tableCU[dev];
+                // token_embedding_tableCU = w.token_embedding_tableCU[dev]; This only needed before the loop
                 l_rms_att_weightCU = w.l_rms_att_weightCU[dev];
                 l_rms_ffn_weightCU = w.l_rms_ffn_weightCU[dev];
                 l_wqCU = w.l_wqCU[dev];
@@ -496,27 +538,50 @@ public class Run {
 
             cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
-            cuda.synchronizeStream(0);
+
+//            if (l == 0) {
+//                summarize(pos, "xCU", cuda, xCU, dim);
+//            }
+
+            // zzz ok
+//            log(pos, "tmp1CU", cuda, tmp1CU, 1);
             cuda.weightNormalizeAndScale.call(
                     0, xbCU, xCU, l_rms_att_weightCU.withIndex(l * dim), tmp1CU, dim);
 
+            // zzz ok
+//            log(pos, "xbCU", cuda, xbCU, dim);
+
             // qkv matmuls for this position
             cuda.matMul.call(0, qCU, xbCU, l_wqCU.withIndex(l * dim * dim), dim, dim);
+
+            // zzz ok
+//            log(pos, "qCU", cuda, qCU, dim);
+
             cuda.matMul.call(0, kCU, xbCU, l_wkCU.withIndex(l * dim * kv_dim), dim, kv_dim);
             cuda.matMul.call(0, vCU, xbCU, l_wvCU.withIndex(l * dim * kv_dim), dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             cuda.applyRope.call(0, qCU, kCU, freq_cis_realCU, freq_cis_imagCU,
                     dim, kv_dim, head_size, freq_cis_imag_row);
+            // zzz ok
+//            log(pos, "qCU", cuda, qCU, dim);
+//            log(pos, "kCU", cuda, kCU, kv_dim);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
 
 //            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
-            cuda.copyBytesFromDeviceToDevice(0, kCU, l_key_cacheCU.withIndex(loff + pos * kv_dim), kv_dim);
+            cuda.copyFloatsFromDeviceToDevice(0, kCU, 0,
+                    l_key_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
 
 //            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
-            cuda.copyBytesFromDeviceToDevice(0, vCU, l_value_cacheCU.withIndex(loff + pos * kv_dim), kv_dim);
+            cuda.copyFloatsFromDeviceToDevice(0, vCU, 0,
+                    l_value_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
+
+            // zzz ok
+
+//            log(pos, "kCU", cuda, kCU, kv_dim);
+//            log(pos, "vCU", cuda, vCU, kv_dim);
 
             // multihead attention. iterate over all heads
             int h;
@@ -536,8 +601,12 @@ public class Run {
                     cuda.memZeroFloat.call(0, tmp2CU, 0, 1);
                     cuda.attention.call(0, tmp2CU, qCU, l_key_cacheCU.withIndex(keyIndex),
                             queryIndex, head_size);
+
+                    // zzz ok
+//                    log(pos, "tmp2CU", cuda, tmp2CU, 1);
+
                     // save the score to the attention buffer
-                    cuda.copyFloatsFromDeviceToDeviceInStream(0, tmp2CU, 0, attCU,
+                    cuda.copyFloatsFromDeviceToDevice(0, tmp2CU, 0, attCU,
                             attentionIndex + t, 1);
                 }
 
@@ -569,6 +638,9 @@ public class Run {
             // residual connection back into x
             cuda.accum.call(0, xCU, xb2CU, dim);
 
+            // zzz ok
+//            log(pos, "xCU", cuda, xCU, dim);
+
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
@@ -588,6 +660,10 @@ public class Run {
 
             // residual connection
             cuda.accum.call(0, xCU, xbCU, dim);
+
+            // zzz ok
+//            log(pos, "xCU", cuda, xCU, dim);
+//            log(pos, "xbCU", cuda, xbCU, dim);
         } // layers
 
         // final rmsnorm
@@ -598,6 +674,42 @@ public class Run {
 
         // classifier into logits
         cuda.matMul.call(0, logitsCU, xCU, wclsCU, 0, p.dim, p.vocab_size);
+//        log(pos, "logitsCU", cuda, logitsCU, p.vocab_size);
+    }
+
+    private static void log(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
+        float[] hostArray = new float[size];
+        cuda.synchronizeAllStreams();
+        cuda.copyFromDeviceToHost(0, pointer, hostArray);
+        cuda.synchronizeAllStreams();
+        log(pos, name, hostArray);
+    }
+
+    private static void log(int pos, String name, float[] hostArray) {
+        System.out.println("START LOG pos " + pos + " " + name + "------------------------------------------------------------------");
+        for (int i = 0; i < hostArray.length; i++) {
+            System.out.print(String.format("%4d", i) + "\t" + String.format("%.3f", hostArray[i]) + "\t");
+            if (i % 10 == 9) {
+                System.out.println();
+            }
+        }
+        if (hostArray.length % 10 != 9) {
+            System.out.println();
+        }
+        System.out.println("END LOG pos " + pos + " " + name + "------------------------------------------------------------------");
+    }
+
+    private static void summarize(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
+        float[] hostArray = new float[size];
+        cuda.synchronizeAllStreams();
+        cuda.copyFromDeviceToHost(0, pointer, hostArray);
+        cuda.synchronizeAllStreams();
+        summarize(pos, name, hostArray);
+    }
+
+    private static void summarize(int pos, String name, float[] a) {
+        String crc32 = crc32(a);
+        System.out.println("\nSUMMARY pos " + pos + " " + name + " " + crc32);
     }
 
 // ----------------------------------------------------------------------------
@@ -607,13 +719,28 @@ public class Run {
         return System.currentTimeMillis();
     }
 
+    private static String crc32(float[] values) {
+        CRC32 crc = new CRC32();
+
+        // Use ByteBuffer to convert float to byte array
+        ByteBuffer buffer = ByteBuffer.allocate(4 * values.length); // each float is 4 bytes
+        for (float value : values) {
+            buffer.putFloat(value);
+        }
+
+        byte[] byteRepresentation = buffer.array();
+        crc.update(byteRepresentation);
+
+        return Long.toHexString(crc.getValue());
+    }
+
 // ----------------------------------------------------------------------------
 // sampling can be done in a few ways: greedy argmax, sampling, top-p sampling
 
     public static void main(String[] args) {
         CommandLine commandLine = new CommandLine(args);
 
-        Mode mode = DEFAULT_MODE;
+        Mode mode = commandLine.getMode();
 
         Long rngSeed = commandLine.getSeed();
         if (rngSeed == null) {
@@ -693,6 +820,7 @@ public class Run {
             if (mode == Mode.CUDA) {
                 context.lastCuda().synchronizeAllStreams();
                 context.lastCuda().copyFromDeviceToHost(0, s.logitsCU[lastDev], logits);
+                context.lastCuda().synchronizeStream(0);
             }
 
             // advance the state machine
