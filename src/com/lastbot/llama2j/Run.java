@@ -452,7 +452,6 @@ public class Run {
         // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
             // hand RunState over to the next device
-            // todo zzz check which arrays are actually needed, this version copies all except layer dependent
             if (l > context.layerAllocation.lastLayer[dev]) {
                 dev++;
                 ContextCUDA newCuda = context.cudas[dev];
@@ -464,15 +463,15 @@ public class Run {
                 // newCuda.synchronizeStream(0);
 
                 cuda.copyFromDeviceToAnotherDevice(0, xCU, s.xCU[dev], newCuda, 0, s.x);
-                cuda.copyFromDeviceToAnotherDevice(0, xbCU, s.xbCU[dev], newCuda, 0, s.xb);
-                cuda.copyFromDeviceToAnotherDevice(0, xb2CU, s.xb2CU[dev], newCuda, 0, s.xb2);
-                cuda.copyFromDeviceToAnotherDevice(0, hbCU, s.hbCU[dev], newCuda, 0, s.hb);
-                cuda.copyFromDeviceToAnotherDevice(0, hb2CU, s.hb2CU[dev], newCuda, 0, s.hb2);
-                cuda.copyFromDeviceToAnotherDevice(0, qCU, s.qCU[dev], newCuda, 0, s.q);
-                cuda.copyFromDeviceToAnotherDevice(0, kCU, s.kCU[dev], newCuda, 0, s.k);
-                cuda.copyFromDeviceToAnotherDevice(0, vCU, s.vCU[dev], newCuda, 0, s.v);
-                cuda.copyFromDeviceToAnotherDevice(0, attCU, s.attCU[dev], newCuda, 0, s.att);
-                cuda.copyFromDeviceToAnotherDevice(0, logitsCU, s.logitsCU[dev], newCuda, 0, s.logits);
+//                cuda.copyFromDeviceToAnotherDevice(0, xbCU, s.xbCU[dev], newCuda, 0, s.xb);
+//                cuda.copyFromDeviceToAnotherDevice(0, xb2CU, s.xb2CU[dev], newCuda, 0, s.xb2);
+//                cuda.copyFromDeviceToAnotherDevice(0, hbCU, s.hbCU[dev], newCuda, 0, s.hb);
+//                cuda.copyFromDeviceToAnotherDevice(0, hb2CU, s.hb2CU[dev], newCuda, 0, s.hb2);
+//                cuda.copyFromDeviceToAnotherDevice(0, qCU, s.qCU[dev], newCuda, 0, s.q);
+//                cuda.copyFromDeviceToAnotherDevice(0, kCU, s.kCU[dev], newCuda, 0, s.k);
+//                cuda.copyFromDeviceToAnotherDevice(0, vCU, s.vCU[dev], newCuda, 0, s.v);
+//                cuda.copyFromDeviceToAnotherDevice(0, attCU, s.attCU[dev], newCuda, 0, s.att);
+//                cuda.copyFromDeviceToAnotherDevice(0, logitsCU, s.logitsCU[dev], newCuda, 0, s.logits);
 
                 // roll over to new device state variables
 
@@ -517,7 +516,8 @@ public class Run {
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
 
-            cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
+            // zzz redundant?
+//            cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
 
 //            log(pos, "tmp1CU", cuda, tmp1CU, 1);
@@ -592,7 +592,8 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
+            // zzz redundant?
+//            cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
             cuda.weightNormalizeAndScale.call(0, xbCU, xCU, l_rms_ffn_weightCU, l * dim, tmp1CU, dim);
 
@@ -613,7 +614,8 @@ public class Run {
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
+        // zzz redundant?
+//        cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
         cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
         cuda.weightNormalizeAndScale.call(0, xCU, xCU, rms_final_weightCU, 0, tmp1CU, dim);
 
