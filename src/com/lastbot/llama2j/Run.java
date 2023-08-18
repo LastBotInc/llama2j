@@ -461,7 +461,7 @@ public class Run {
                 // do not copy layer specific state that remains in the current device
                 // both source and destination use 0 streamId
 
-                cuda.synchronizeAllStreams();
+                // newCuda.synchronizeStream(0);
 
                 cuda.copyFromDeviceToAnotherDevice(0, xCU, s.xCU[dev], newCuda, 0, s.x);
                 cuda.copyFromDeviceToAnotherDevice(0, xbCU, s.xbCU[dev], newCuda, 0, s.xb);
@@ -617,16 +617,15 @@ public class Run {
         cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
         cuda.weightNormalizeAndScale.call(0, xCU, xCU, rms_final_weightCU, 0, tmp1CU, dim);
 
-        // classifier into logits
+        // classifier into logits, and send in OUTPUT_STREAM
         cuda.matMul.call(0, logitsCU, xCU, wclsCU, 0, p.dim, p.vocab_size);
-//        log(pos, "logitsCU", cuda, logitsCU, p.vocab_size);
     }
 
     private static void log(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
         float[] hostArray = new float[size];
-        cuda.synchronizeAllStreams();
+        cuda.synchronizeDevice();
         cuda.copyFromDeviceToHost(0, pointer, hostArray);
-        cuda.synchronizeAllStreams();
+        cuda.synchronizeDevice();
         log(pos, name, hostArray);
     }
 
@@ -646,9 +645,9 @@ public class Run {
 
     private static void summarize(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
         float[] hostArray = new float[size];
-        cuda.synchronizeAllStreams();
+        cuda.synchronizeDevice();
         cuda.copyFromDeviceToHost(0, pointer, hostArray);
-        cuda.synchronizeAllStreams();
+        cuda.synchronizeDevice();
         summarize(pos, name, hostArray);
     }
 
@@ -764,7 +763,7 @@ public class Run {
 
                 // if in cuda mode, copy logits from CUDA to CPU
                 if (mode == Mode.CUDA) {
-                    context.lastCuda().synchronizeAllStreams();
+                    context.lastCuda().synchronizeStream(0);
                     context.lastCuda().copyFromDeviceToHost(0, s.logitsCU[lastDev], logits);
                     context.lastCuda().synchronizeStream(0);
                 }
