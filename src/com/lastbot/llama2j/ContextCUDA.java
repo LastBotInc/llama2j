@@ -208,16 +208,16 @@ public class ContextCUDA implements Closeable {
                 sourceDeviceArray, byteSize, cudaMemcpyDeviceToHost, streams[streamId]));
     }
 
-    public void copyFloatsFromDeviceToDeviceInStream(int streamId, Pointer sourceDeviceArray, long sourceIndex,
-                                                     Pointer targetDeviceArray, long targetIndex,
-                                                     long floatSize) {
-        copyBytesFromDeviceToDeviceInStream(streamId, sourceDeviceArray, sourceIndex * Sizeof.FLOAT,
+    public void copyFloatsFromDeviceToDevice(int streamId, Pointer sourceDeviceArray, long sourceIndex,
+                                             Pointer targetDeviceArray, long targetIndex,
+                                             long floatSize) {
+        copyBytesFromDeviceToDevice(streamId, sourceDeviceArray, sourceIndex * Sizeof.FLOAT,
                 targetDeviceArray, targetIndex * Sizeof.FLOAT, floatSize * Sizeof.FLOAT);
     }
 
-    public void copyBytesFromDeviceToDeviceInStream(int streamId, Pointer sourceDeviceArray, long sourceOffset,
-                                                    Pointer targetDeviceArray, long targetOffset,
-                                                    long byteSize) {
+    private void copyBytesFromDeviceToDevice(int streamId, Pointer sourceDeviceArray, long sourceOffset,
+                                            Pointer targetDeviceArray, long targetOffset,
+                                            long byteSize) {
         setDevice();
 
         Pointer source = sourceOffset == 0 ? sourceDeviceArray : sourceDeviceArray.withByteOffset(sourceOffset);
