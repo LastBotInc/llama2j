@@ -24,7 +24,6 @@ public class ContextCUDA implements Closeable {
     public final Accum accum;
     public final AccumWeightedValue accumWeightedValue;
     public final ApplyRope applyRope;
-    public final Attention attention;
     public final AttentionLoop attentionLoop;
     public final ExpAndSum expAndSum;
     public final FindMax findMax;
@@ -86,7 +85,6 @@ public class ContextCUDA implements Closeable {
         this.accum = new Accum(this);
         this.accumWeightedValue = new AccumWeightedValue(this);
         this.applyRope = new ApplyRope(this);
-        this.attention = new Attention(this);
         this.attentionLoop = new AttentionLoop(this);
         this.expAndSum = new ExpAndSum(this);
         this.findMax = new FindMax(this);
