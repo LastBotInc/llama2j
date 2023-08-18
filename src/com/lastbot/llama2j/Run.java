@@ -156,18 +156,24 @@ public class Run {
                     int queryIndex = finalH * head_size;
                     // attention scores for this head
                     int attentionIndex = finalH * p.seq_len;
-//                float*att = s -> att + h * p.seq_len;
-                    // iterate over all timesteps, including the current one
-                    for (int t = 0; t <= pos; t++) {
-                        // get the key vector for this head and at this timestep
-//                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-                        int keyIndex = loff + t * kv_dim + (finalH / kv_mul) * head_size;
 
-                        MemZeroFloat.call(s.tmp2, 0, 1);
-                        Attention.call(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
-                        // save the score to the attention buffer
-                        s.att[attentionIndex + t] = s.tmp2[0];
-                    }
+                    int keyBase = loff + (finalH / kv_mul) * head_size;
+
+                    AttentionLoop.call(s.q, s.l_key_cache, s.att, attentionIndex, keyBase,
+                            kv_dim, queryIndex, pos, head_size);
+
+////                float*att = s -> att + h * p.seq_len;
+//                    // iterate over all timesteps, including the current one
+//                    for (int t = 0; t <= pos; t++) {
+//                        // get the key vector for this head and at this timestep
+////                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+//                        int keyIndex = loff + t * kv_dim + (finalH / kv_mul) * head_size;
+//
+//                        MemZeroFloat.call(s.tmp2, 0, 1);
+//                        Attention.call(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
+//                        // save the score to the attention buffer
+//                        s.att[attentionIndex + t] = s.tmp2[0];
+//                    }
                     latch.countDown();
                 });
             }
@@ -268,8 +274,6 @@ public class Run {
         // copy the token embedding into x
         System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
 
-//        log(pos, "s.x", s.x);
-
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         int freq_cis_imag_row = pos * head_size / 2;
 
@@ -294,24 +298,13 @@ public class Run {
 
             cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
-            // zzz ok
-//            log(pos, "s.xb", s.xb);
-
             // qkv matmuls for this position
             cuda.matMul.test(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
-
-            // zzz ok
-//            log(pos, "s.q", s.q);
-
             cuda.matMul.test(s.k, s.xb, w.l_wk, l * dim * kv_dim, dim, kv_dim);
             cuda.matMul.test(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             cuda.applyRope.test(s.q, s.k, w.freq_cis_real, w.freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
-
-            // zzz ok
-//            log(pos, "s.q", s.q);
-//            log(pos, "s.k", s.k);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
@@ -324,11 +317,6 @@ public class Run {
 //            memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
             System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
 
-            // zzz ok
-
-//            log(pos, "k", s.k);
-//            log(pos, "c", s.v);
-
             // multihead attention. iterate over all heads
             int h;
             for (h = 0; h < p.n_heads; h++) {
@@ -337,22 +325,11 @@ public class Run {
                 int queryIndex = h * head_size;
                 // attention scores for this head
                 int attentionIndex = h * p.seq_len;
-//                float*att = s -> att + h * p.seq_len;
-                // iterate over all timesteps, including the current one
-                for (int t = 0; t <= pos; t++) {
-                    // get the key vector for this head and at this timestep
-//                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-                    int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
 
-                    cuda.memZeroFloat.test(s.tmp2, 0, 1);
-                    cuda.attention.test(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
+                int keyBase = loff + (h / kv_mul) * head_size;
 
-                    // zzz ok
-//                    log(pos, "s.tmp2", s.tmp2);
-
-                    // save the score to the attention buffer
-                    s.att[attentionIndex + t] = s.tmp2[0];
-                }
+                cuda.attentionLoop.test(s.q, s.l_key_cache, s.att, attentionIndex, keyBase,
+                        kv_dim, queryIndex, pos, head_size);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
@@ -382,9 +359,6 @@ public class Run {
             // residual connection back into x
             cuda.accum.test(s.x, s.xb2, dim);
 
-            // zzz ok
-            // log(pos, "s.x", s.x);
-
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
@@ -406,9 +380,6 @@ public class Run {
             // residual connection
             cuda.accum.test(s.x, s.xb, dim);
 
-            // zzz ok
-//            log(pos, "s.x", s.x);
-//            log(pos, "s.xb", s.xb);
         } // layers
 
         // final rmsnorm
@@ -471,14 +442,9 @@ public class Run {
         Pointer freq_cis_imagCU = w.freq_cis_imagCU[dev];
         Pointer wclsCU = w.wclsCU[dev];
 
-//        log(pos, "1 xCU", cuda, xCU, dim);
         // copy the token embedding into x
         cuda.copyFloatsFromDeviceToDevice(0, token_embedding_tableCU, token * dim,
                 xCU, 0, dim);
-//        log(pos, "token_embedding_tableCU", cuda, token_embedding_tableCU, (token + 10) * dim);
-
-        // zzz is OK
-//        log(pos, "xCU", cuda, xCU, dim);
 
         // pluck out the "pos" row of freq_cis_real and freq_cis_imag
         int freq_cis_imag_row = pos * head_size / 2;
@@ -554,33 +520,18 @@ public class Run {
             cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
 
-//            if (l == 0) {
-//                summarize(pos, "xCU", cuda, xCU, dim);
-//            }
-
-            // zzz ok
 //            log(pos, "tmp1CU", cuda, tmp1CU, 1);
             cuda.weightNormalizeAndScale.call(
                     0, xbCU, xCU, l_rms_att_weightCU.withIndex(l * dim), tmp1CU, dim);
 
-            // zzz ok
-//            log(pos, "xbCU", cuda, xbCU, dim);
-
             // qkv matmuls for this position
             cuda.matMul.call(0, qCU, xbCU, l_wqCU.withIndex(l * dim * dim), dim, dim);
-
-            // zzz ok
-//            log(pos, "qCU", cuda, qCU, dim);
-
             cuda.matMul.call(0, kCU, xbCU, l_wkCU.withIndex(l * dim * kv_dim), dim, kv_dim);
             cuda.matMul.call(0, vCU, xbCU, l_wvCU.withIndex(l * dim * kv_dim), dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             cuda.applyRope.call(0, qCU, kCU, freq_cis_realCU, freq_cis_imagCU,
                     dim, kv_dim, head_size, freq_cis_imag_row);
-            // zzz ok
-//            log(pos, "qCU", cuda, qCU, dim);
-//            log(pos, "kCU", cuda, kCU, kv_dim);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
@@ -593,11 +544,6 @@ public class Run {
             cuda.copyFloatsFromDeviceToDevice(0, vCU, 0,
                     l_value_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
 
-            // zzz ok
-
-//            log(pos, "kCU", cuda, kCU, kv_dim);
-//            log(pos, "vCU", cuda, vCU, kv_dim);
-
             // multihead attention. iterate over all heads
             int h;
             for (h = 0; h < p.n_heads; h++) {
@@ -606,27 +552,14 @@ public class Run {
                 int queryIndex = h * head_size;
                 // attention scores for this head
                 int attentionIndex = h * p.seq_len;
-//                float*att = s -> att + h * p.seq_len;
 
-                // TODO implement this loop entirely in GPU
+                int keyBase = loff + (h / kv_mul) * head_size -
+                        (int) l_key_cacheCU.floatOffset();
 
-                // iterate over all timesteps, including the current one
-                for (int t = 0; t <= pos; t++) {
-                    // get the key vector for this head and at this timestep
-//                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-                    int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
-                    // calculate the attention score as the dot product of q and k
-                    cuda.memZeroFloat.call(0, tmp2CU, 0, 1);
-                    cuda.attention.call(0, tmp2CU, qCU, l_key_cacheCU.withIndex(keyIndex),
-                            queryIndex, head_size);
+                int stream = 0;
 
-                    // zzz ok
-//                    log(pos, "tmp2CU", cuda, tmp2CU, 1);
-
-                    // save the score to the attention buffer
-                    cuda.copyFloatsFromDeviceToDevice(0, tmp2CU, 0, attCU,
-                            attentionIndex + t, 1);
-                }
+                cuda.attentionLoop.call(stream, qCU, l_key_cacheCU.pointer(), attCU,
+                        attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
@@ -656,9 +589,6 @@ public class Run {
             // residual connection back into x
             cuda.accum.call(0, xCU, xb2CU, dim);
 
-            // zzz ok
-//            log(pos, "xCU", cuda, xCU, dim);
-
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
@@ -679,9 +609,6 @@ public class Run {
             // residual connection
             cuda.accum.call(0, xCU, xbCU, dim);
 
-            // zzz ok
-//            log(pos, "xCU", cuda, xCU, dim);
-//            log(pos, "xbCU", cuda, xbCU, dim);
         } // layers
 
         // final rmsnorm
@@ -768,8 +695,6 @@ public class Run {
         Config p = new Config();
         TransformerWeights w = null;
 
-        Sampler sampler = new Sampler(rngSeed);
-
         // read in the checkpoint file
         long startModelRead = time();
         LLogger.info("Start reading checkpoint " + commandLine.getCheckpoint());
@@ -830,73 +755,81 @@ public class Run {
 
         int lastDev = layerAllocation.deviceCount - 1;
 
-        while (pos < steps) {
-            // forward the transformer to get logits for the next token
-            transformer(token, pos, mode, p, s, w, context);
+        Sampler sampler = new Sampler(rngSeed, p.vocab_size);
 
-            // if in cuda mode, copy logits from CUDA to CPU
-            if (mode == Mode.CUDA) {
-                context.lastCuda().synchronizeAllStreams();
-                context.lastCuda().copyFromDeviceToHost(0, s.logitsCU[lastDev], logits);
-                context.lastCuda().synchronizeStream(0);
-            }
+        try {
+            while (pos < steps) {
+                // forward the transformer to get logits for the next token
+                transformer(token, pos, mode, p, s, w, context);
 
-            // advance the state machine
-            if (pos < prompt_tokens.length) {
-                // if we are still processing the input prompt, force the next prompt token
-                next = prompt_tokens[pos];
-            } else {
-                // sample the next token (in this version, sampling is done on CPU)
-                if (commandLine.getTemperature() == 0.0f) {
-                    // greedy argmax sampling: take the token with the highest probability
-                    next = sampler.argmax(logits, p.vocab_size);
+                // if in cuda mode, copy logits from CUDA to CPU
+                if (mode == Mode.CUDA) {
+                    context.lastCuda().synchronizeAllStreams();
+                    context.lastCuda().copyFromDeviceToHost(0, s.logitsCU[lastDev], logits);
+                    context.lastCuda().synchronizeStream(0);
+                }
+
+                // advance the state machine
+                if (pos < prompt_tokens.length) {
+                    // if we are still processing the input prompt, force the next prompt token
+                    next = prompt_tokens[pos];
                 } else {
-                    // apply the temperature to the logits
-                    for (int q = 0; q < p.vocab_size; q++) {
-                        s.logits[q] /= commandLine.getTemperature();
-                    }
-                    // apply softmax to the logits to get the probabilities for next token
+                    // sample the next token (in this version, sampling is done on CPU)
+                    if (commandLine.getTemperature() == 0.0f) {
+                        // greedy argmax sampling: take the token with the highest probability
+                        next = sampler.argmax(logits, p.vocab_size);
+                    } else {
+                        // apply the temperature to the logits
+                        for (int q = 0; q < p.vocab_size; q++) {
+                            logits[q] /= commandLine.getTemperature();
+                        }
+                        // apply softmax to the logits to get the probabilities for next token
 //                    softmax(state.logits, 0, config.vocab_size);
 
-                    // find max value (for numerical stability)
-                    float[] max = {0f};
-                    FindMax.call(max, s.logits, 0, p.vocab_size);
+                        // find max value (for numerical stability)
+                        float[] max = {0f};
+                        FindMax.call(max, logits, 0, p.vocab_size);
 
-                    // exp and sum
-                    float[] sum = {0f};
-                    ExpAndSum.call(sum, s.logits, max, 0, p.vocab_size);
+                        // exp and sum
+                        float[] sum = {0f};
+                        ExpAndSum.call(sum, logits, max, 0, p.vocab_size);
 
-                    // normalize
-                    Normalize.call(s.logits, sum, 0, p.vocab_size);
+                        // normalize
+                        Normalize.call(logits, sum, 0, p.vocab_size);
 
-                    if (commandLine.getTopp() == null) {
-                        // we sample from this distribution to get the next token
-                        next = sampler.sample(s, p.vocab_size);
-                    } else {
-                        // top-p (nucleus) sampling, clamping the least likely tokens to zero
-                        next = sampler.sample_topp(s, p.vocab_size, commandLine.getTopp());
+                        if (commandLine.getTopp() > 0.999) {
+                            // we sample from this distribution to get the next token
+                            next = sampler.sample(logits, p.vocab_size);
+                        } else {
+                            // top-p (nucleus) sampling, clamping the least likely tokens to zero
+                            next = sampler.sample_topp(logits, p.vocab_size, commandLine.getTopp());
+                        }
                     }
                 }
-            }
-            pos++;
+                pos++;
 
-            // data-dependent terminating condition: the BOS (1) token delimits sequences
-            if (next == 1) {
-                break;
-            }
+                // data-dependent terminating condition: the BOS (1) token delimits sequences
+                if (next == 1) {
+                    break;
+                }
 
-            String token_str = tokenizer.bpe_decode(token, next);
-            if (token_str != null) {
-                Output.emit(token_str);
-            }
+                String token_str = tokenizer.bpe_decode(token, next);
+                if (token_str != null) {
+                    Output.emit(token_str);
+                }
 
-            token = next;
+                token = next;
 
-            // init our timer here
-            if (start == 0) {
-                start = time();
+                // init our timer here
+                if (start == 0) {
+                    start = time();
+                }
             }
+        } catch (Exception e) {
+            System.out.println();
+            LLogger.error("Unexpected", e);
         }
+
         Output.emit("\n");
 
         long end = time();
