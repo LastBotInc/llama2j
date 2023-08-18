@@ -133,9 +133,10 @@ public class TransformerWeights {
                 wclsCU[dev] = sharedWeights ? token_embedding_tableCU[dev] :
                         cu.allocateAndCopyToDevice(13 % STREAM_COUNT, wcls, true);
             }
+            // as transfers are async, make sure all devices are sync
             for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = context.cudas[dev];
-                cu.synchronizeAllStreams();
+                cu.synchronizeDevice();
             }
             long t3 = System.currentTimeMillis();
             LLogger.time("Create TransformerWeights CUDA", t2, t3);
