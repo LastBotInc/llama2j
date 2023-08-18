@@ -78,6 +78,9 @@ public class Sampler {
         float cutoff = (1.0f - topp) / (n - 1);
 
         for (int i = 0; i < n; i++) {
+            if (Float.isNaN(logits[i])) {
+                throw new RuntimeException("Sampler: Float.isNaN(logits[i])");
+            }
             if (logits[i] >= cutoff) {
                 probIndex[n0].index = i;
                 probIndex[n0].prob = logits[i];
