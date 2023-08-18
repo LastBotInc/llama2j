@@ -23,8 +23,6 @@ public class RunState implements Closeable {
         }
     }
 
-    private final Context c;
-    private final Config config;
     // current wave of activations
     float[] x; // activation at current time stamp (dim,)
     float[] xb; // same, but inside a residual branch (dim,)
@@ -38,7 +36,6 @@ public class RunState implements Closeable {
     float[] logits; // output logits
     float[] tmp1;
     float[] tmp2;
-    float[] tmp3;
 
     // kv cache
     float[] l_key_cache;   // (layer, seq_len, dim)
@@ -60,7 +57,6 @@ public class RunState implements Closeable {
     SlicePointer[] l_value_cacheCU;
     Pointer[] tmp1CU;
     Pointer[] tmp2CU;
-    Pointer[] tmp3CU;
 
     public static long bytesStatic(Config p) {
         int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
@@ -76,7 +72,6 @@ public class RunState implements Closeable {
                         ((long) p.n_heads * p.seq_len) +
                         ((long) p.vocab_size) +
                         ((long) 1) +
-                        ((long) 1) +
                         ((long) 1)
                 // omit probIndex, as it is currently only CPU
         );
@@ -90,9 +85,7 @@ public class RunState implements Closeable {
         );
     }
 
-    public RunState(Context context, Config p) {
-        this.config = p;
-        this.c = context;
+    public RunState(Context c, Config p) {
 
         long t0 = System.currentTimeMillis();
         int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
@@ -108,7 +101,6 @@ public class RunState implements Closeable {
         logits = c.cpu.allocateFloatArray(p.vocab_size);
         tmp1 = c.cpu.allocateFloatArray(1);
         tmp2 = c.cpu.allocateFloatArray(1);
-        tmp3 = c.cpu.allocateFloatArray(1);
 
         probIndex = new ProbIndex[p.vocab_size];
         for (int i = 0; i < p.vocab_size; i++) {
@@ -120,9 +112,9 @@ public class RunState implements Closeable {
         long t1 = System.currentTimeMillis();
         LLogger.time("Create RunState CPU", t0, t1);
 
-        if (context.layerAllocation.deviceCount > 0) {
+        if (c.layerAllocation.deviceCount > 0) {
             long t2 = System.currentTimeMillis();
-            int n = context.layerAllocation.deviceCount;
+            int n = c.layerAllocation.deviceCount;
 
             xCU = new Pointer[n];
             xbCU = new Pointer[n];
@@ -138,12 +130,11 @@ public class RunState implements Closeable {
             l_value_cacheCU = new SlicePointer[n];
             tmp1CU = new Pointer[n];
             tmp2CU = new Pointer[n];
-            tmp3CU = new Pointer[n];
 
-            for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
+            for (int dev = 0; dev < c.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = c.cudas[dev];
-                int firstLayer = context.layerAllocation.firstLayer[dev];
-                int lastLayer = context.layerAllocation.lastLayer[dev];
+                int firstLayer = c.layerAllocation.firstLayer[dev];
+                int lastLayer = c.layerAllocation.lastLayer[dev];
 
                 xCU[dev] = cu.allocateFloatArray(p.dim, true);
                 xbCU[dev] = cu.allocateFloatArray(p.dim, true);
@@ -170,13 +161,12 @@ public class RunState implements Closeable {
 
                 tmp1CU[dev] = cu.allocateFloatArray(1, true);
                 tmp2CU[dev] = cu.allocateFloatArray(1, true);
-                tmp3CU[dev] = cu.allocateFloatArray(1, true);
 
                 if (xCU[dev] == null || xbCU[dev] == null || xb2CU[dev] == null || hbCU[dev] == null ||
                         hb2CU[dev] == null || qCU[dev] == null || kCU[dev] == null || vCU[dev] == null ||
                         attCU[dev] == null || logitsCU[dev] == null ||
                         l_key_cacheCU[dev] == null || l_value_cacheCU[dev] == null ||
-                        tmp1CU[dev] == null || tmp2CU[dev] == null ||tmp3CU[dev] == null) {
+                        tmp1CU[dev] == null || tmp2CU[dev] == null) {
                     LLogger.error("Failed to allocate CUDA memory on device " + dev);
                     throw new RuntimeException();
                 }
