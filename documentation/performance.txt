@@ -1,3 +1,29 @@
+---------------- llama2j ----------------
+CUDA llama2_7b.bin 2 GPU
+MAX_THREADS_PER_BLOCK = 32;
+achieved tok/s: 9.8
+
+Parallelize
+// qkv matmuls for this position
+achieved tok/s: 10.0
+
+Attention in two blocks
+achieved tok/s: 10.1
+
+parallelize attention
+achieved tok/s: 10.2
+
+eliminate redundant cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
+achieved tok/s: 10.3
+
+MAX_THREADS_PER_BLOCK = 64;
+achieved tok/s: 9.2
+
+
+CPU llama2_7b.bin
+achieved tok/s: 4.7
+
+
 ---------------- llama2.c ----------------
 #make runomp
 
