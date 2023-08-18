@@ -1,7 +1,5 @@
 package com.lastbot.llama2j;
 
-import com.lastbot.llama2j.kernel.Mode;
-
 public class LayerAllocation {
     public int deviceCount;
     public long staticBytes;
@@ -13,10 +11,6 @@ public class LayerAllocation {
 
     public boolean hasCPULayers() {
         return firstCPULayer >= 0;
-    }
-
-    public boolean hasGPULayers() {
-        return deviceCount > 0;
     }
 
     public LayerAllocation(long[] gpuMem, Config config, Mode mode, boolean sharedWeights) {
@@ -112,8 +106,8 @@ public class LayerAllocation {
         if (firstCPULayer >= 0) {
             int nLayers = lastCPULayer - firstCPULayer + 1;
             long usagePerDevice = staticBytes + nLayers * bytesPerLayer;
-            Runtime runtime           = Runtime.getRuntime();
-            long allocatedMemory      = runtime.totalMemory() - runtime.freeMemory();
+            Runtime runtime = Runtime.getRuntime();
+            long allocatedMemory = runtime.totalMemory() - runtime.freeMemory();
             long presumableFreeMemory = runtime.maxMemory() - allocatedMemory;
             double utilizationPercentage = 100D * usagePerDevice / presumableFreeMemory;
             LLogger.info("CPU: Layers " + firstCPULayer + " - " + lastCPULayer +
