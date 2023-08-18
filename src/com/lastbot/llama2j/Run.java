@@ -145,26 +145,41 @@ public class Run {
 //            memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
             System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
 
-            // multihead attention. iterate over all heads
+            CountDownLatch latch = new CountDownLatch(p.n_heads);
+            // multihead attention. iterate over all heads in parallel
             int h;
             for (h = 0; h < p.n_heads; h++) {
-                // get the query vector for this head
+                int finalH = h;
+                Thread.ofVirtual().start(() -> {
+                    // get the query vector for this head
 //                float*q = s -> q + h * head_size;
-                int queryIndex = h * head_size;
+                    int queryIndex = finalH * head_size;
+                    // attention scores for this head
+                    int attentionIndex = finalH * p.seq_len;
+//                float*att = s -> att + h * p.seq_len;
+                    // iterate over all timesteps, including the current one
+                    for (int t = 0; t <= pos; t++) {
+                        // get the key vector for this head and at this timestep
+//                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+                        int keyIndex = loff + t * kv_dim + (finalH / kv_mul) * head_size;
+
+                        MemZeroFloat.call(s.tmp2, 0, 1);
+                        Attention.call(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
+                        // save the score to the attention buffer
+                        s.att[attentionIndex + t] = s.tmp2[0];
+                    }
+                    latch.countDown();
+                });
+            }
+            try {
+                latch.await();
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            // multihead attention. iterate over all heads
+            for (h = 0; h < p.n_heads; h++) {
                 // attention scores for this head
                 int attentionIndex = h * p.seq_len;
-//                float*att = s -> att + h * p.seq_len;
-                // iterate over all timesteps, including the current one
-                for (int t = 0; t <= pos; t++) {
-                    // get the key vector for this head and at this timestep
-//                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-                    int keyIndex = loff + t * kv_dim + (h / kv_mul) * head_size;
-
-                    MemZeroFloat.call(s.tmp2, 0, 1);
-                    Attention.call(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
-                    // save the score to the attention buffer
-                    s.att[attentionIndex + t] = s.tmp2[0];
-                }
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
@@ -592,6 +607,9 @@ public class Run {
                 // attention scores for this head
                 int attentionIndex = h * p.seq_len;
 //                float*att = s -> att + h * p.seq_len;
+
+                // TODO implement this loop entirely in GPU
+
                 // iterate over all timesteps, including the current one
                 for (int t = 0; t <= pos; t++) {
                     // get the key vector for this head and at this timestep
