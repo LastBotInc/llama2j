@@ -8,6 +8,10 @@ import jcuda.driver.CUmodule;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.attribute.FileTime;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -30,7 +34,7 @@ public abstract class Kernel {
     private static final String CUDA_SOURCE_EXTENSION = ".cu";
     private static final String CUBIN_EXTENSION = ".cubin";
 
-//    private static final String CUDA_DIR = "/usr/local/cuda-12.2";
+    //    private static final String CUDA_DIR = "/usr/local/cuda-12.2";
     private static final String CUDA_DIR = "/usr/local/cuda-12.0";
     private static final String NVCC_PATH = CUDA_DIR + File.separator + "bin" + File.separator + "nvcc";
     private static final String CUDA_ARCHITECTURE = "compute_89";
@@ -99,7 +103,26 @@ public abstract class Kernel {
         String cubinFileName;
         if (fileName.endsWith(CUDA_SOURCE_EXTENSION)) {
             cuda.setDevice();
-            cubinFileName = Kernel.prepareCubinFile(KERNEL_DIRECTORY + File.separator + fileName);
+            String cuFilename = KERNEL_DIRECTORY + File.separator + fileName;
+            int endIndex = cuFilename.lastIndexOf('.');
+            if (endIndex == -1) endIndex = cuFilename.length() - 1;
+            cubinFileName = cuFilename.substring(0, endIndex + 1) + "cubin";
+
+            boolean needCompile = false;
+            Path cuPath = Paths.get(cuFilename);
+            Path cubinPath = Paths.get(cubinFileName);
+            if (!Files.exists(cubinPath)) {
+                needCompile = true;
+            } else {
+                FileTime cuTime = Files.getLastModifiedTime(cuPath);
+                FileTime cubinTime = Files.getLastModifiedTime(cubinPath);
+                if (cuTime.compareTo(cubinTime) > 0) {
+                    needCompile = true;
+                }
+            }
+            if (needCompile) {
+                Kernel.prepareCubinFile(cuFilename, cubinFileName);
+            }
         } else {
             if (fileName.endsWith(CUBIN_EXTENSION)) {
                 cubinFileName = fileName;
@@ -120,10 +143,7 @@ public abstract class Kernel {
         return function;
     }
 
-    private static String prepareCubinFile(String cuFileName) throws IOException {
-        int endIndex = cuFileName.lastIndexOf('.');
-        if (endIndex == -1) endIndex = cuFileName.length() - 1;
-        String cubinFileName = cuFileName.substring(0, endIndex + 1) + "cubin";
+    private static void prepareCubinFile(String cuFileName, String cubinFileName) throws IOException {
 
         ProcessBuilder processBuilder = new ProcessBuilder(
                 NVCC_PATH,
@@ -135,19 +155,16 @@ public abstract class Kernel {
                 cubinFileName
         );
         processBuilder.inheritIO();  // To display the output in console
-        int exitVal = -1;
-        Process process = null;
         try {
-            process = processBuilder.start();
-            exitVal = process.waitFor();
+            Process process = processBuilder.start();
+            int exitVal = process.waitFor();
             if (exitVal != 0) {
                 LLogger.error("When compiling " + cuFileName + " into " + cubinFileName + " got exit value " + exitVal);
-                return null;
+                throw new RuntimeException();
             }
-            return cubinFileName;
         } catch (InterruptedException e) {
             LLogger.error("When compiling " + cuFileName + " into " + cubinFileName, e);
-            return null;
+            throw new RuntimeException();
         }
     }
 
