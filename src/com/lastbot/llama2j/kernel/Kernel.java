@@ -42,7 +42,7 @@ public abstract class Kernel {
 
     protected final int TEST_STREAM = ContextCUDA.TEST_STREAM;
 
-    public static final int MAX_THREADS_PER_BLOCK = 1024;
+    public static final int MAX_THREADS_PER_BLOCK = 64;
 
     private final Map<KernelSize, CUfunction> functionByKernelSizeMap = new HashMap<>();
 
