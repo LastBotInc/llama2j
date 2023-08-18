@@ -121,7 +121,7 @@ public class Run {
         for (int l = 0; l < p.n_layers; l++) {
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            MemZeroFloat.call(s.tmp1, 0, 1);
+//            MemZeroFloat.call(s.tmp1, 0, 1);
             SumOfSquares.call(s.tmp1, s.x, dim);
 
             WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
@@ -191,11 +191,13 @@ public class Run {
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                MemZeroFloat.call(s.tmp1, 0, 1);
+                // redundant
+//                MemZeroFloat.call(s.tmp1, 0, 1);
                 FindMax.call(s.tmp1, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
-                MemZeroFloat.call(s.tmp2, 0, 1);
+                // redundant
+//                MemZeroFloat.call(s.tmp2, 0, 1);
                 ExpAndSum.call(s.tmp2, s.att, s.tmp1, attentionIndex, pos + 1);
 
                 // normalize
@@ -218,7 +220,7 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            MemZeroFloat.call(s.tmp1, 0, 1);
+//            MemZeroFloat.call(s.tmp1, 0, 1);
             SumOfSquares.call(s.tmp1, s.x, dim);
             WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
@@ -250,7 +252,7 @@ public class Run {
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        MemZeroFloat.call(s.tmp1, 0, 1);
+//        MemZeroFloat.call(s.tmp1, 0, 1);
         SumOfSquares.call(s.tmp1, s.x, dim);
         WeightNormalizeAndScale.call(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
@@ -335,11 +337,13 @@ public class Run {
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                cuda.memZeroFloat.test(s.tmp1, 0, 1);
+                // redundant
+//                cuda.memZeroFloat.test(s.tmp1, 0, 1);
                 cuda.findMax.test(s.tmp1, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
-                cuda.memZeroFloat.test(s.tmp2, 0, 1);
+                // redundant
+//                cuda.memZeroFloat.test(s.tmp2, 0, 1);
                 cuda.expAndSum.test(s.tmp2, s.att, s.tmp1, attentionIndex, pos + 1);
 
                 // normalize
@@ -516,18 +520,21 @@ public class Run {
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
 
-            // zzz redundant?
-//            cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
 
 //            log(pos, "tmp1CU", cuda, tmp1CU, 1);
             cuda.weightNormalizeAndScale.call(
                     0, xbCU, xCU, l_rms_att_weightCU.withIndex(l * dim), tmp1CU, dim);
 
+            cuda.synchronizeStream(0);
+
             // qkv matmuls for this position
-            cuda.matMul.call(0, qCU, xbCU, l_wqCU.withIndex(l * dim * dim), dim, dim);
-            cuda.matMul.call(0, kCU, xbCU, l_wkCU.withIndex(l * dim * kv_dim), dim, kv_dim);
+            cuda.matMul.call(1, qCU, xbCU, l_wqCU.withIndex(l * dim * dim), dim, dim);
+            cuda.matMul.call(2, kCU, xbCU, l_wkCU.withIndex(l * dim * kv_dim), dim, kv_dim);
             cuda.matMul.call(0, vCU, xbCU, l_wvCU.withIndex(l * dim * kv_dim), dim, kv_dim);
+
+            cuda.synchronizeStream(1);
+            cuda.synchronizeStream(2);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             cuda.applyRope.call(0, qCU, kCU, freq_cis_realCU, freq_cis_imagCU,
@@ -545,6 +552,7 @@ public class Run {
                     l_value_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
 
             // multihead attention. iterate over all heads
+            int maxStream = 0;
             int h;
             for (h = 0; h < p.n_heads; h++) {
                 // get the query vector for this head
@@ -556,20 +564,31 @@ public class Run {
                 int keyBase = loff + (h / kv_mul) * head_size -
                         (int) l_key_cacheCU.floatOffset();
 
-                int stream = 0;
+                int streamId = h % ContextCUDA.STREAM_COUNT;
+                if (streamId > maxStream) {
+                    maxStream = streamId;
+                }
 
-                cuda.attentionLoop.call(stream, qCU, l_key_cacheCU.pointer(), attCU,
+                cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU,
                         attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
+            }
+            for (int streamId = 1; streamId <= maxStream; streamId++) {
+                cuda.synchronizeStream(streamId);
+            }
 
+            for (h = 0; h < p.n_heads; h++) {
+                int attentionIndex = h * p.seq_len;
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
+                // zzz redundant ?
+//                cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
                 cuda.findMax.call(0, tmp1CU, attCU, attentionIndex, pos + 1);
 
                 // exp and sum
-                cuda.memZeroFloat.call(0, tmp2CU, 0, 1);
+                // zzz redundant ?
+//                cuda.memZeroFloat.call(0, tmp2CU, 0, 1);
                 cuda.expAndSum.call(0, tmp2CU, attCU, tmp1CU, attentionIndex, pos + 1);
 
                 // normalize
@@ -592,8 +611,6 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            // zzz redundant?
-//            cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
             cuda.weightNormalizeAndScale.call(0, xbCU, xCU, l_rms_ffn_weightCU, l * dim, tmp1CU, dim);
 
@@ -614,8 +631,6 @@ public class Run {
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        // zzz redundant?
-//        cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
         cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
         cuda.weightNormalizeAndScale.call(0, xCU, xCU, rms_final_weightCU, 0, tmp1CU, dim);
 
