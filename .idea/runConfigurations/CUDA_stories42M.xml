@@ -2,6 +2,7 @@
   <configuration default="false" name="CUDA stories42M" type="Application" factoryName="Application">
     <envs>
       <env name="CUDA_HOME" value="/usr/local/cuda/" />
+      <env name="CUDA_DEVICE_MAX_CONNECTIONS" value="16" />
     </envs>
     <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
     <module name="llama2j" />
