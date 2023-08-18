@@ -224,7 +224,7 @@ public class ContextCUDA implements Closeable {
         Pointer target = targetOffset == 0 ? targetDeviceArray : targetDeviceArray.withByteOffset(targetOffset);
 
         // Asynchronous copy from device to device
-        isError(cudaMemcpyAsync(source, target, byteSize,
+        isError(cudaMemcpyAsync(target, source, byteSize,
                 cudaMemcpyDeviceToDevice, streams[streamId]));
     }
 
@@ -233,7 +233,7 @@ public class ContextCUDA implements Closeable {
         setDevice();
 
         // Asynchronous copy from device to host
-        isError(cudaMemcpyAsync(sourceDeviceArray, targetDeviceArray, byteSize,
+        isError(cudaMemcpyAsync(targetDeviceArray, sourceDeviceArray, byteSize,
                 cudaMemcpyDeviceToDevice, streams[streamId]));
     }
 
