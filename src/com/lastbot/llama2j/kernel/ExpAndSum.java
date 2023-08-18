@@ -10,7 +10,7 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class ExpAndSum extends Kernel {
-    private static final int SMALL_KERNEL = 1024;
+    private static final int SMALL_KERNEL = MAX_THREADS_PER_BLOCK;
     private static final int LARGE_KERNEL = 1024 * 1024;
 
     private final CUfunction smallKernel;
