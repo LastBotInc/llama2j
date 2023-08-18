@@ -2,6 +2,7 @@ package com.lastbot.llama2j;
 
 import jcuda.Pointer;
 
+import static com.lastbot.llama2j.ContextCUDA.STREAM_COUNT;
 import static com.lastbot.llama2j.ContextCUDA.allocateAndCopyLayers;
 
 public class TransformerWeights {
@@ -116,20 +117,21 @@ public class TransformerWeights {
                 int firstLayer = context.layerAllocation.firstLayer[dev];
                 int lastLayer = context.layerAllocation.lastLayer[dev];
 
-                l_rms_att_weightCU[dev] = allocateAndCopyLayers(1, cu, l_rms_att_weight, firstLayer, lastLayer, p.n_layers);
-                l_rms_ffn_weightCU[dev] = allocateAndCopyLayers(2, cu, l_rms_ffn_weight, firstLayer, lastLayer, p.n_layers);
-                l_wqCU[dev] = allocateAndCopyLayers(3, cu, l_wq, firstLayer, lastLayer, p.n_layers);
-                l_wkCU[dev] = allocateAndCopyLayers(4, cu, l_wk, firstLayer, lastLayer, p.n_layers);
-                l_wvCU[dev] = allocateAndCopyLayers(5, cu, l_wv, firstLayer, lastLayer, p.n_layers);
-                l_woCU[dev] = allocateAndCopyLayers(6, cu, l_wo, firstLayer, lastLayer, p.n_layers);
-                l_w1CU[dev] = allocateAndCopyLayers(7, cu, l_w1, firstLayer, lastLayer, p.n_layers);
-                l_w2CU[dev] = allocateAndCopyLayers(8, cu, l_w2, firstLayer, lastLayer, p.n_layers);
-                l_w3CU[dev] = allocateAndCopyLayers(9, cu, l_w3, firstLayer, lastLayer, p.n_layers);
+                l_rms_att_weightCU[dev] = allocateAndCopyLayers(1 % STREAM_COUNT, cu, l_rms_att_weight, firstLayer, lastLayer, p.n_layers);
+                l_rms_ffn_weightCU[dev] = allocateAndCopyLayers(2 % STREAM_COUNT, cu, l_rms_ffn_weight, firstLayer, lastLayer, p.n_layers);
+                l_wqCU[dev] = allocateAndCopyLayers(3 % STREAM_COUNT, cu, l_wq, firstLayer, lastLayer, p.n_layers);
+                l_wkCU[dev] = allocateAndCopyLayers(4 % STREAM_COUNT, cu, l_wk, firstLayer, lastLayer, p.n_layers);
+                l_wvCU[dev] = allocateAndCopyLayers(5 % STREAM_COUNT, cu, l_wv, firstLayer, lastLayer, p.n_layers);
+                l_woCU[dev] = allocateAndCopyLayers(6 % STREAM_COUNT, cu, l_wo, firstLayer, lastLayer, p.n_layers);
+                l_w1CU[dev] = allocateAndCopyLayers(7 % STREAM_COUNT, cu, l_w1, firstLayer, lastLayer, p.n_layers);
+                l_w2CU[dev] = allocateAndCopyLayers(8 % STREAM_COUNT, cu, l_w2, firstLayer, lastLayer, p.n_layers);
+                l_w3CU[dev] = allocateAndCopyLayers(9 % STREAM_COUNT, cu, l_w3, firstLayer, lastLayer, p.n_layers);
 
-                rms_final_weightCU[dev] = cu.allocateAndCopyToDevice(10, rms_final_weight, true);
-                freq_cis_realCU[dev] = cu.allocateAndCopyToDevice(11, freq_cis_real, true);
-                freq_cis_imagCU[dev] = cu.allocateAndCopyToDevice(12, freq_cis_imag, true);
-                wclsCU[dev] = sharedWeights ? token_embedding_tableCU[dev] : cu.allocateAndCopyToDevice(13, wcls, true);
+                rms_final_weightCU[dev] = cu.allocateAndCopyToDevice(10 % STREAM_COUNT, rms_final_weight, true);
+                freq_cis_realCU[dev] = cu.allocateAndCopyToDevice(11 % STREAM_COUNT, freq_cis_real, true);
+                freq_cis_imagCU[dev] = cu.allocateAndCopyToDevice(12 % STREAM_COUNT, freq_cis_imag, true);
+                wclsCU[dev] = sharedWeights ? token_embedding_tableCU[dev] :
+                        cu.allocateAndCopyToDevice(13 % STREAM_COUNT, wcls, true);
             }
             for (int dev = 0; dev < context.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = context.cudas[dev];
