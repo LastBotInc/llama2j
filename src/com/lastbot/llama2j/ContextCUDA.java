@@ -1,7 +1,6 @@
 package com.lastbot.llama2j;
 
 import com.lastbot.llama2j.kernel.*;
-import jcuda.CudaException;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUstream;
@@ -46,7 +45,7 @@ public class ContextCUDA implements Closeable {
         if (s != null) {
             try {
                 value = Integer.parseInt(s.strip());
-                if (value > 2 && value < 32) {
+                if (value > 4 && value < 32) {
                     LLogger.info("Using CUDA_DEVICE_MAX_CONNECTIONS " + value);
                 } else {
                     LLogger.info("Invalid CUDA_DEVICE_MAX_CONNECTIONS " + value + ", using default " + DEFAULT);
@@ -271,21 +270,17 @@ public class ContextCUDA implements Closeable {
         targetContext.copyFromHostToDevice(targetStreamId, hostArray, targetDeviceArray);
     }
 
-    public void synchronizeAllStreams() {
+    public void synchronizeDevice() {
         setDevice();
-        for (int streamId = 0; streamId < STREAM_COUNT; streamId++) {
-            synchronizeStream(streamId);
+        if (isError(cudaDeviceSynchronize())) {
+            throw new RuntimeException("synchronizeDevice failed");
         }
     }
 
     public void synchronizeStream(int streamId) {
         setDevice();
-        try {
-            if (isError(cudaStreamSynchronize(streams[streamId]))) {
-                throw new RuntimeException("synchronizeStream " + streamId + " failed");
-            }
-        } catch (CudaException e) {
-            throw new RuntimeException("synchronizeStream CudaException", e);
+        if (isError(cudaStreamSynchronize(streams[streamId]))) {
+            throw new RuntimeException("synchronizeStream " + streamId + " failed");
         }
     }
 
