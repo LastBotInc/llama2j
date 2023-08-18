@@ -1,4 +1,4 @@
-package com.lastbot.llama2j.kernel;
+package com.lastbot.llama2j;
 
 public enum Mode {
     /**
