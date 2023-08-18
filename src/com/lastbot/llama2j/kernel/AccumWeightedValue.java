@@ -22,28 +22,6 @@ public class AccumWeightedValue extends Kernel {
 
     public static void call(float[] xb, float[] att, float[] l_value_cache, int pos, int xbIndex,
                             int valueBase, int head_size, int kv_dim, int attentionIndex) {
-        float sum;
-        int t;
-        int vIndex;
-        float a;
-
-        // Iterate over heads first
-        for (int i = 0; i < head_size; i++) {
-            sum = 0.0f;
-            for (t = 0; t <= pos; t++) {
-                // get the value vector for this head and at this timestep
-                vIndex = valueBase + t * kv_dim;
-                // get the attention weight for this timestep
-                a = att[attentionIndex + t];
-                // accumulate the weighted value into xb
-                sum += a * l_value_cache[vIndex + i];
-            }
-            xb[xbIndex + i] += sum;
-        }
-    }
-
-    public static void call2(float[] xb, float[] att, float[] l_value_cache, int pos, int xbIndex,
-                             int valueBase, int head_size, int kv_dim, int attentionIndex) {
         // weighted sum of the values, store back into xb
         for (int t = 0; t <= pos; t++) {
             // get the value vector for this head and at this timestep
