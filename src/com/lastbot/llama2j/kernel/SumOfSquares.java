@@ -11,7 +11,7 @@ import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class SumOfSquares extends Kernel {
     private static final int SMALL_KERNEL = 1024;
-    private static final int LARGE_KERNEL = 1024 * 1024;
+    private static final int LARGE_KERNEL = 1024 * MAX_THREADS_PER_BLOCK;
 
     private final CUfunction smallKernel;
     private final CUfunction largeLocalSumKernel;
@@ -83,7 +83,6 @@ public class SumOfSquares extends Kernel {
         } else if (size <= LARGE_KERNEL) {
             int threadsPerBlock = 1024;
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
-            Pointer blockSum = cuda.allocate((long) blocksPerGrid * Float.BYTES);
             // exp and sum
             {
                 int sharedMemory = threadsPerBlock * Float.BYTES;
@@ -92,7 +91,7 @@ public class SumOfSquares extends Kernel {
 
 //                __global__ void localSumOfSquares(float* blockSum, float* x, int size) {
                 Pointer kernelParameters = Pointer.to(
-                        Pointer.to(blockSum),
+                        Pointer.to(sum),
                         Pointer.to(x),
                         Pointer.to(new int[]{size})
                 );
@@ -112,10 +111,9 @@ public class SumOfSquares extends Kernel {
                 int gridSizeX = 1;
                 int sharedMemory = blockSizeX * Float.BYTES;
 
-//                __global__ void sumReduction(float* sum, float* blockSum, int blocksPerGrid) {
+//                __global__ void sumReduction(float* sum, int blocksPerGrid) {
                 Pointer kernelParameters = Pointer.to(
                         Pointer.to(sum),
-                        Pointer.to(blockSum),
                         Pointer.to(new int[]{blocksPerGrid}),
                         Pointer.to(new int[]{size})
                 );
@@ -129,7 +127,6 @@ public class SumOfSquares extends Kernel {
                     cuda.synchronizeStream(streamId);
                 }
             }
-            cuda.free(blockSum);
         } else {
             throw new RuntimeException("ExpAndSum.call with too large size" + size);
         }
@@ -174,7 +171,7 @@ public class SumOfSquares extends Kernel {
                 """
                             extern "C"
                             // First kernel: Calculate the exponential values and perform block-wise reduction.
-                            __global__ void localSumOfSquares(float* blockSum, float* x, int size) {
+                            __global__ void localSumOfSquares(float* sum, float* x, int size) {
                                 int tid = blockIdx.x * blockDim.x + threadIdx.x;
                                     
                                 // Shared memory for block-wise summation
@@ -200,7 +197,7 @@ public class SumOfSquares extends Kernel {
                                     
                                 // First thread of each block writes its result to the global array
                                 if (threadIdx.x == 0) {
-                                    blockSum[blockIdx.x] = sdata[0];
+                                    sum[blockIdx.x] = sdata[0];
                                 }
                             }
                         """;
@@ -212,12 +209,12 @@ public class SumOfSquares extends Kernel {
                 """
                             extern "C"
                             // Second kernel: Sums up the partial sums
-                            __global__ void sumReduction(float* sum, float* blockSum, int blocksPerGrid, int size) {
+                            __global__ void sumReduction(float* sum, int blocksPerGrid, int size) {
                                 extern __shared__ float sdata[];
                             
                                 int tid = threadIdx.x;
                                 if (tid < blocksPerGrid) {
-                                    sdata[tid] = blockSum[tid];
+                                    sdata[tid] = sum[tid];
                                 } else {
                                     sdata[tid] = 0.0f;
                                 }
