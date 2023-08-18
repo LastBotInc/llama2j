@@ -6,6 +6,8 @@ import jcuda.Sizeof;
 import java.io.Closeable;
 
 public class RunState implements Closeable {
+    private static final int TMP_ARRAY_SIZE = 1024 * 1024;
+
     // struct used when sorting probabilities during top-p sampling, CPU only
     public static class ProbIndex implements Comparable<ProbIndex> {
         public float prob;
@@ -159,8 +161,8 @@ public class RunState implements Closeable {
                 l_value_cacheCU[dev] = new SlicePointer(cu.allocateFloatArray(floatSize, true),
                         floatOffset, byteOffset, byteSize);
 
-                tmp1CU[dev] = cu.allocateFloatArray(1, true);
-                tmp2CU[dev] = cu.allocateFloatArray(1, true);
+                tmp1CU[dev] = cu.allocateFloatArray(TMP_ARRAY_SIZE, true);
+                tmp2CU[dev] = cu.allocateFloatArray(TMP_ARRAY_SIZE, true);
 
                 if (xCU[dev] == null || xbCU[dev] == null || xb2CU[dev] == null || hbCU[dev] == null ||
                         hb2CU[dev] == null || qCU[dev] == null || kCU[dev] == null || vCU[dev] == null ||
