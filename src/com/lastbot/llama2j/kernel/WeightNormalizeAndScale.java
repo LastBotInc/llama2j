@@ -1,7 +1,6 @@
 package com.lastbot.llama2j.kernel;
 
-import com.lastbot.llama2j.ContextCUDA;
-import com.lastbot.llama2j.SlicePointer;
+import com.lastbot.llama2j.*;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUfunction;
@@ -20,50 +19,97 @@ public class WeightNormalizeAndScale extends Kernel {
         this.kernel = create();
     }
 
-    public static void call(float[] out, float[] x, float[] weight, int weightIndex,
-                            float[] sumOfSquares, int size) {
+    public static void callFP32(float[] out, float[] x, float[] weight, int weightIndex,
+                                float[] sumOfSquares, int size) {
         float ss = sumOfSquares[0];
-        for (int i = 0; i < size; i++) {
-            out[i] = weight[weightIndex + i] * (ss * x[i]);
+        for (int jj = 0; jj < size; jj++) {
+            out[jj] = weight[weightIndex + jj] * (ss * x[jj]);
         }
     }
 
-    public void test(float[] out, float[] x, float[] weight, int weightIndex,
-                     float[] sumOfSquares, int size) {
+    public static void callI8(float[] out, float[] x, QuantArray w, int weightIndex,
+                              float[] sumOfSquares, int size) {
+        float ss = sumOfSquares[0];
+        // W (d,n) @ x (n,) -> xout (d,)
+        Quant q = w.getQuant();
+
+        byte[] encoded = w.getByteArray();
+
+        int groupSize = q.groupSize();
+        float min;
+        float max;
+        float range;
+        int groupBase;
+        int groupPayloadBase;
+        int startGroupIndex = q.groupIndexByFloatIndex(weightIndex);
+        int endGroupIndex = q.groupIndexByFloatIndex(weightIndex + size - 1);
+
+        int index;
+        int count = 0;
+
+        for (int group = startGroupIndex; group <= endGroupIndex; group++) {
+            groupBase = group * q.encodedBytesPerGroup();
+//                LLogger.debug("groupBase " + groupBase + " encoded.length " + encoded.length);
+            groupPayloadBase = groupBase + 8;
+            min = bytesToFloat(encoded, groupBase);
+            max = bytesToFloat(encoded, groupBase + 4);
+            range = max - min;
+
+            int startFloatIndex = group * groupSize;
+            for (int j = 0; j < groupSize; j++) {
+                index = startFloatIndex + j;
+                if (index >= weightIndex && index < weightIndex + size) {
+//                        LLogger.debug("group " + group + " index " + index);
+                    int byteValue = encoded[groupPayloadBase + j] & 0xff;
+                    float value = byteValue / 255f * range + min;
+                    out[count] = value * (ss * x[count]);
+                    count++;
+                }
+            }
+        }
+
+        if (count != size) {
+            throw new RuntimeException("count != n");
+        }
+    }
+
+    public void testI8(float[] out, float[] x, QuantArray w, int weightIndex,
+                       float[] sumOfSquares, int size) {
         float[] copyOfOut = Arrays.copyOf(out, out.length);
         float[] copyOfx = Arrays.copyOf(x, x.length); // x can point to out!
         Pointer pOut = cuda.allocateAndCopyToDevice(TEST_STREAM, out, false);
         Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
-        Pointer pWeight = cuda.allocateAndCopyToDevice(TEST_STREAM, weight, false);
+        QuantPointer pWeight = new QuantPointer(w.getQuant(),
+                cuda.allocateAndCopyToDevice(TEST_STREAM, w.getByteArray(), false), 0);
         Pointer pSumOfSquares = cuda.allocateAndCopyToDevice(TEST_STREAM, sumOfSquares, false);
         cuda.synchronizeStream(TEST_STREAM);
-        call(TEST_STREAM, pOut, px, pWeight, weightIndex, pSumOfSquares, size);
+        callI8(TEST_STREAM, pOut, px, pWeight, weightIndex, pSumOfSquares, size);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.copyFromDeviceToHost(TEST_STREAM, pOut, out);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pOut);
         cuda.free(px);
-        cuda.free(pWeight);
+        cuda.free(pWeight.getPointer());
         cuda.free(pSumOfSquares);
 
-        call(copyOfOut, copyOfx, weight, weightIndex, sumOfSquares, size);
+        callI8(copyOfOut, copyOfx, w, weightIndex, sumOfSquares, size);
 
         compareWithThreshold("WeightNormalizeAndScale.call", out, copyOfOut, 1e-5f);
     }
 
-    public void call(int streamId, Pointer out, Pointer x, SlicePointer weight, int weightIndex,
-                     Pointer sumOfSquares, int size) {
+    public void callFP32(int streamId, Pointer out, Pointer x, SlicePointer weight, int weightIndex,
+                         Pointer sumOfSquares, int size) {
         Pointer weightWithIndex = weight.withIndex(weightIndex);
-        call(streamId, out, x, weightWithIndex, sumOfSquares, size);
+        callFP32(streamId, out, x, weightWithIndex, sumOfSquares, size);
     }
 
-    public void call(int streamId, Pointer out, Pointer x, Pointer weight, int weightIndex,
-                     Pointer sumOfSquares, int size) {
+    public void callFP32(int streamId, Pointer out, Pointer x, Pointer weight, int weightIndex,
+                         Pointer sumOfSquares, int size) {
         Pointer weightWithIndex = weight.withByteOffset((long) weightIndex * Sizeof.FLOAT);
-        call(streamId, out, x, weightWithIndex, sumOfSquares, size);
+        callFP32(streamId, out, x, weightWithIndex, sumOfSquares, size);
     }
 
-    public void call(int streamId, Pointer out, Pointer x, Pointer weight, Pointer sumOfSquares, int size) {
+    public void callFP32(int streamId, Pointer out, Pointer x, Pointer weight, Pointer sumOfSquares, int size) {
 //        __global__ void weightNormalizeAndScale(float *out, const float *x, const float *weight,
 //                    const float* sumOfSquares, const int size)
         Pointer kernelParameters = Pointer.to(
@@ -71,6 +117,34 @@ public class WeightNormalizeAndScale extends Kernel {
                 Pointer.to(x),
                 Pointer.to(weight),
                 Pointer.to(sumOfSquares),
+                Pointer.to(new int[]{size})
+        );
+
+        // Set up the kernel launch parameters.
+        int blockSizeX = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
+        int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
+
+        isError(cuLaunchKernel(kernel,
+                gridSizeX, 1, 1,          // Grid dimension
+                blockSizeX, 1, 1,      // Block dimension
+                0, cuda.getCUKernelStream(streamId),  // Shared memory size and stream
+                kernelParameters, null // Kernel- and extra parameters
+        ));
+        if (SYNC_KERNEL_CALLS) {
+            cuda.synchronizeStream(streamId);
+        }
+    }
+
+    public void callI8(int streamId, Pointer out, Pointer x, QuantPointer weight, int weightIndex,
+                       Pointer sumOfSquares, int size) {
+//        __global__ void weightNormalizeAndScale(float *out, const float *x, const float *weight,
+//                    const float* sumOfSquares, const int size)
+        Pointer kernelParameters = Pointer.to(
+                Pointer.to(out),
+                Pointer.to(x),
+                Pointer.to(weight.getPointer()),
+                Pointer.to(sumOfSquares),
+                Pointer.to(new int[]{weightIndex}),
                 Pointer.to(new int[]{size})
         );
 
