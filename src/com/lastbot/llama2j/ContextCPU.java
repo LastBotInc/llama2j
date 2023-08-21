@@ -10,12 +10,12 @@ public class ContextCPU implements Closeable {
     }
 
     public float[] allocateFloatArray(long elements) {
-        if (elements <= Limits.FLOAT_ARRAY_MAX_SIZE) {
+        if (elements <= Limits.ARRAY_MAX_SIZE) {
             int size = (int) elements;
             return new float[size];
         }
 
-        double ratio = (double) elements / (double) Limits.FLOAT_ARRAY_MAX_SIZE;
+        double ratio = (double) elements / (double) Limits.ARRAY_MAX_SIZE;
         String s = "Tried to allocate " + String.format("%,d", elements) +
                 " elements, which is " + String.format("%,.1f", ratio) +
                 " times more than supported";
@@ -25,12 +25,12 @@ public class ContextCPU implements Closeable {
     }
 
     public int[] allocateIntArray(long elements) {
-        if (elements <= Limits.INT_ARRAY_MAX_SIZE) {
+        if (elements <= Limits.ARRAY_MAX_SIZE) {
             int size = (int) elements;
             return new int[size];
         }
 
-        double ratio = (double) elements / (double) Limits.INT_ARRAY_MAX_SIZE;
+        double ratio = (double) elements / (double) Limits.ARRAY_MAX_SIZE;
         String s = "Tried to allocate " + String.format("%,d", elements) +
                 " elements, which is " + String.format("%,.1f", ratio) +
                 " times more than supported";
