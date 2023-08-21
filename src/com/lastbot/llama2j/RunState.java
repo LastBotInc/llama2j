@@ -6,8 +6,6 @@ import jcuda.Sizeof;
 import java.io.Closeable;
 
 public class RunState implements Closeable {
-    private static final int TMP_ARRAY_SIZE = 1024 * 1024;
-
     // current wave of activations
     float[] x; // activation at current time stamp (dim,)
     float[] xb; // same, but inside a residual branch (dim,)
@@ -82,8 +80,13 @@ public class RunState implements Closeable {
         v = c.cpu.allocateFloatArray(kv_dim);
         att = c.cpu.allocateFloatArray((long) p.n_heads * p.seq_len);
         logits = c.cpu.allocateFloatArray(p.vocab_size);
-        tmp1 = c.cpu.allocateFloatArray(1);
-        tmp2 = c.cpu.allocateFloatArray(1);
+        // we use tmp arrays to copy data from GPU to CPU to be copied to another GPU (p.dim floats), and
+        // to copy logits from GPU to CPU (p.vocab_size floats). We set the size of tmp1 and tmp2 buffers to
+        // accommodate both transfers. In addition, the tmp1CU and tmp2CU are used within transformer for smaller
+        // transfers.
+        int tmpSize = Math.max(p.dim, p.vocab_size);
+        tmp1 = c.cpu.allocateFloatArray(tmpSize);
+        tmp2 = c.cpu.allocateFloatArray(tmpSize);
 
         l_key_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
         l_value_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
@@ -137,8 +140,8 @@ public class RunState implements Closeable {
                 l_value_cacheCU[dev] = new SlicePointer(cu.allocateFloatArray(floatSize, true),
                         floatOffset, byteOffset, byteSize);
 
-                tmp1CU[dev] = cu.allocateFloatArray(TMP_ARRAY_SIZE, true);
-                tmp2CU[dev] = cu.allocateFloatArray(TMP_ARRAY_SIZE, true);
+                tmp1CU[dev] = cu.allocateFloatArray(tmp1.length, true);
+                tmp2CU[dev] = cu.allocateFloatArray(tmp1.length, true);
 
                 if (xCU[dev] == null || xbCU[dev] == null || xb2CU[dev] == null || hbCU[dev] == null ||
                         hb2CU[dev] == null || qCU[dev] == null || kCU[dev] == null || vCU[dev] == null ||
