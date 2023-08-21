@@ -3,100 +3,160 @@ package com.lastbot.llama2j;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.nio.ByteOrder;
-import java.nio.MappedByteBuffer;
+import java.nio.*;
 import java.nio.channels.FileChannel;
 import java.nio.charset.Charset;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
 
 public class BinFileReader implements Closeable {
-    private static final int ALIGNED_BY_4_BYTES_MAX_BUFFER_SIZE = (Integer.MAX_VALUE / 4) * 4;
+    private final String filePath;
+    private long readSize = 0;
+    private final FileChannel channel;
 
-    private MappedByteBuffer[] buffers;
-    private int currentBuffer = 0;
-
+    @SuppressWarnings("resource")
     public BinFileReader(String filePath) throws IOException {
-        try (RandomAccessFile file = new RandomAccessFile(filePath, "r");
-             FileChannel channel = file.getChannel()) {
-
-            long readSize = 0;
-            long fileSize = file.length();
-
-            int numberOfBuffers = (int) (fileSize / ALIGNED_BY_4_BYTES_MAX_BUFFER_SIZE + 1);
-            buffers = new MappedByteBuffer[numberOfBuffers];
-
-            for (int i = 0; i < numberOfBuffers; i++) {
-                long remaining = fileSize - readSize;
-                long chunkSize = Math.min(remaining, ALIGNED_BY_4_BYTES_MAX_BUFFER_SIZE);
-
-                buffers[i] = channel.map(FileChannel.MapMode.READ_ONLY, readSize, chunkSize);
-                buffers[i].order(ByteOrder.LITTLE_ENDIAN);
-                readSize += chunkSize;
-            }
-        } catch (IOException e) {
-            String s = "Failed to read bin file" + filePath;
-            LLogger.error(s, e);
-            throw e;
-        }
+        this.filePath = filePath;
+        RandomAccessFile file = new RandomAccessFile(filePath, "r");
+        this.channel = file.getChannel();
     }
 
-    public float[] nextFloatArray(int count) {
-        int remaining = count;
-        int index = 0;
-        float[] data = new float[count];
+    public String getDirectory() {
+        Path path = Paths.get(filePath);
+        Path parentDir = path.getParent();
+        return (parentDir != null) ? parentDir.toString() : null;
+    }
+
+    public String getBaseName() {
+        Path path = Paths.get(filePath);
+        String fileName = path.getFileName().toString();
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            return fileName.substring(0, dotIndex);
+        }
+        return fileName;
+    }
+
+    public List<MappedByteBuffer> nextByteBufferByFloatCount(int floatCount) throws IOException {
+        long bytes = (long) floatCount * Float.BYTES;
+        return nextByteBufferByByteCount(bytes);
+    }
+
+    public List<MappedByteBuffer> nextByteBufferByIntCount(int intCount) throws IOException {
+        long bytes = (long) intCount * Integer.BYTES;
+        return nextByteBufferByByteCount(bytes);
+    }
+
+    public List<MappedByteBuffer> nextByteBufferByByteCount(long bytes) throws IOException {
+
+        List<MappedByteBuffer> buffers = new ArrayList<>();
+
+        long remaining = bytes;
         while (remaining > 0) {
-            MappedByteBuffer buffer = buffers[currentBuffer];
-            int size = Math.min(remaining, buffer.remaining() / 4);
-            for (int i = 0; i < size; i++) {
-                data[index++] = buffer.getFloat();
-            }
-            remaining -= size;
-            if (buffer.remaining() == 0) {
-                currentBuffer++;
-            }
-        }
-        return data;
-    }
-
-    private void rollover(long length) {
-        if (buffers[currentBuffer].remaining() < length) {
-            currentBuffer++;
-            if (currentBuffer >= buffers.length) {
-                String m = "Tried to read " + String.format("%,d", length) + ", but all buffers exhausted";
-                LLogger.error(m);
-                throw new RuntimeException(m);
-            }
-            int remaining = buffers[currentBuffer].remaining();
-            if (remaining < length) {
-                String m = "Tried to read " + String.format("%,d", length) + "," +
-                        "but only " + String.format("%,d", remaining) + " is remaining";
-                LLogger.error(m);
-                throw new RuntimeException(m);
+            int size = (int) Math.min(Limits.ARRAY_MAX_SIZE, remaining);
+            try {
+                MappedByteBuffer byteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, readSize, size);
+                byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+                buffers.add(byteBuffer);
+                readSize += size;
+                remaining -= size;
+            } catch (IllegalArgumentException e) {
+                LLogger.error("channel.map", e);
             }
         }
+        return buffers;
     }
 
-    public float nextFloat() {
-        rollover(4);
-        return buffers[currentBuffer].getFloat();
-    }
+    public float[] nextFloatArray(int floatCount) throws IOException {
+        List<MappedByteBuffer> buffers = nextByteBufferByFloatCount(floatCount);
 
-    public int nextInt() {
-        rollover(4);
-        return buffers[currentBuffer].getInt();
-    }
-
-    public String nextString(int length, Charset charset) {
-        rollover(length);
-        byte[] buf = new byte[length];
-        for (int i = 0; i < length; i++) {
-            buf[i] = buffers[currentBuffer].get();
+        long totalBytes = 0;
+        for (MappedByteBuffer buffer : buffers) {
+            totalBytes += buffer.remaining();
         }
-        String s = new String(buf, charset);
+
+        if (totalBytes / Float.BYTES > Limits.ARRAY_MAX_SIZE) {
+            throw new RuntimeException("totalBytes > Limits.BYTE_ARRAY_MAX_SIZE");
+        }
+
+        if (totalBytes % Float.BYTES != 0) {
+            throw new RuntimeException("totalBytes % Float.BYTES != 0");
+        }
+        int totalFloats = (int) (totalBytes / Float.BYTES);
+
+        if (totalFloats != floatCount) {
+            throw new RuntimeException("totalFloats != floatCount");
+        }
+
+        float[] floatArray = new float[floatCount];
+
+        int arrayPos = 0;
+        for (ByteBuffer byteBuffer : buffers) {
+            FloatBuffer floatBuffer = byteBuffer.asFloatBuffer();
+            int floatSize = floatBuffer.remaining();
+            floatBuffer.get(floatArray, arrayPos, floatSize);
+            arrayPos += floatSize;
+        }
+        return floatArray;
+    }
+
+    public int[] nextIntArray(int intCount) throws IOException {
+        List<MappedByteBuffer> buffers = nextByteBufferByIntCount(intCount);
+
+        long totalBytes = 0;
+        for (MappedByteBuffer buffer : buffers) {
+            totalBytes += buffer.remaining();
+        }
+
+        if (totalBytes / Integer.BYTES > Limits.ARRAY_MAX_SIZE) {
+            throw new RuntimeException("totalBytes > Limits.BYTE_ARRAY_MAX_SIZE");
+        }
+
+        if (totalBytes % Integer.BYTES != 0) {
+            throw new RuntimeException("totalBytes % Int.BYTES != 0");
+        }
+        int totalInts = (int) (totalBytes / Integer.BYTES);
+
+        if (totalInts != intCount) {
+            throw new RuntimeException("totalInts != intCount");
+        }
+
+        int[] intArray = new int[totalInts];
+
+        int arrayPos = 0;
+        for (ByteBuffer byteBuffer : buffers) {
+            IntBuffer intBuffer = byteBuffer.asIntBuffer();
+            int intSize = intBuffer.remaining();
+            intBuffer.get(intArray, arrayPos, intSize);
+            arrayPos += intSize;
+        }
+        return intArray;
+    }
+
+    public float nextFloat() throws IOException {
+        float[] floatArray = nextFloatArray(1);
+        return floatArray[0];
+    }
+
+    public int nextInt() throws IOException {
+        int[] intArray = nextIntArray(1);
+        return intArray[0];
+    }
+
+    public String nextString(int length, Charset charset) throws IOException {
+        List<MappedByteBuffer> buffers = nextByteBufferByByteCount(length);
+        if (buffers.size() != 1) {
+            throw new RuntimeException("nextString(): buffers.size() != 1");
+        }
+        MappedByteBuffer byteBuffer = buffers.get(0);
+        String s = charset.decode(byteBuffer).toString();
         return s;
     }
 
     @Override
-    public void close() {
-        buffers = null;
+    public void close() throws IOException {
+        channel.close();
     }
 }
