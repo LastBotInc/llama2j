@@ -23,9 +23,10 @@ See file upstream.txt for details on the commit that this version is synchronize
 
 */
 public class Run {
-    public static final int THREAD_COUNT = 32;
-
     private static final String MODELS_DIRECTORY = "models";
+
+    public static final int QUANT_GROUP_SIZE = 32 - 8;
+    public static final int QUANT_BITS = 8;
 
 // ----------------------------------------------------------------------------
 // The below commented-out functions show how to implement rmsnorm() or softmax()
@@ -53,45 +54,6 @@ public class Run {
 //        // normalize
 //        normalize(sum, x, index, size);
 //    }
-
-    /**
-     * This function is left here as a special case to make the testing with CPU only faster, as 99% of
-     * CPU time is spent here.
-     */
-    private static void matmul(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
-        matmulParallel(xout, x, w, weightIndex, n, d);
-    }
-
-    private static void matmulParallel(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
-        int sizePerThread = d / THREAD_COUNT;
-        CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
-        for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
-            // W (d,n) @ x (n,) -> xout (d,)
-            final int end = Math.min(d, (threadId + 1) * sizePerThread);
-            int finalThreadId = threadId;
-            Thread.ofVirtual().start(() -> {
-                try {
-                    float val;
-                    int weightPos;
-                    for (int i = finalThreadId * sizePerThread; i < end; i++) {
-                        val = 0.0f;
-                        weightPos = weightIndex + i * n;
-                        for (int j = 0; j < n; j++) {
-                            val += w[weightPos + j] * x[j];
-                        }
-                        xout[i] = val;
-                    }
-                } finally {
-                    latch.countDown();
-                }
-            });
-        }
-        try {
-            latch.await();
-        } catch (InterruptedException e) {
-            LLogger.error("fastMatmul was interrupted");
-        }
-    }
 
     private static void transformer(int token, int pos, Mode mode, Config p, RunState s,
                                     TransformerWeights w, Context context) {
@@ -124,12 +86,12 @@ public class Run {
 //            MemZeroFloat.call(s.tmp1, 0, 1);
             SumOfSquares.call(s.tmp1, s.x, dim);
 
-            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
+            WeightNormalizeAndScale.callI8(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
             // qkv matmuls for this position
-            matmul(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
-            matmul(s.k, s.xb, w.l_wk, l * dim * kv_dim, dim, kv_dim);
-            matmul(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
+            MatMul.callI8(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
+            MatMul.callI8(s.k, s.xb, w.l_wk, l * dim * kv_dim, dim, kv_dim);
+            MatMul.callI8(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             ApplyRope.call(s.q, s.k, w.freq_cis_real, w.freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
@@ -204,6 +166,8 @@ public class Run {
                 Normalize.call(s.att, s.tmp2, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
+                // todo zzz consider removing zeroing and integrating that into AccumWeightedValue
+                // feasibility depends on if the performance will be worse if we switch the inner and outer loops
                 int xbIndex = h * head_size;
                 MemZeroFloat.call(s.xb, xbIndex, head_size);
 
@@ -213,7 +177,7 @@ public class Run {
             }
 
             // final matmul to get the output of the attention
-            matmul(s.xb2, s.xb, w.l_wo, l * dim * dim, dim, dim);
+            MatMul.callI8(s.xb2, s.xb, w.l_wo, l * dim * dim, dim, dim);
             // residual connection back into x
             Accum.call(s.x, s.xb2, dim);
 
@@ -222,12 +186,12 @@ public class Run {
 
 //            MemZeroFloat.call(s.tmp1, 0, 1);
             SumOfSquares.call(s.tmp1, s.x, dim);
-            WeightNormalizeAndScale.call(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
+            WeightNormalizeAndScale.callI8(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            matmul(s.hb, s.xb, w.l_w1, l * dim * hidden_dim, dim, hidden_dim);
-            matmul(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
+            MatMul.callI8(s.hb, s.xb, w.l_w1, l * dim * hidden_dim, dim, hidden_dim);
+            MatMul.callI8(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
 
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
             // elementwise multiply with w3(x)
@@ -244,7 +208,7 @@ public class Run {
 //            }
 
             // final matmul to get the output of the ffn
-            matmul(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
+            MatMul.callI8(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
 
             // residual connection
             Accum.call(s.x, s.xb, dim);
@@ -254,10 +218,10 @@ public class Run {
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
 //        MemZeroFloat.call(s.tmp1, 0, 1);
         SumOfSquares.call(s.tmp1, s.x, dim);
-        WeightNormalizeAndScale.call(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
+        WeightNormalizeAndScale.callI8(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
         // classifier into logits
-        matmul(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+        MatMul.callFP32(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
     }
 
     private static void transformerTest(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
@@ -298,12 +262,12 @@ public class Run {
 //                summarize(pos, "s.x", s.x);
 //            }
 
-            cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
+            cuda.weightNormalizeAndScale.testI8(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
             // qkv matmuls for this position
-            cuda.matMul.test(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
-            cuda.matMul.test(s.k, s.xb, w.l_wk, l * dim * kv_dim, dim, kv_dim);
-            cuda.matMul.test(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
+            cuda.matMul.testI8(s.q, s.xb, w.l_wq, l * dim * dim, dim, dim);
+            cuda.matMul.testI8(s.k, s.xb, w.l_wk, l * dim * kv_dim, dim, kv_dim);
+            cuda.matMul.testI8(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             cuda.applyRope.test(s.q, s.k, w.freq_cis_real, w.freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
@@ -359,7 +323,7 @@ public class Run {
             }
 
             // final matmul to get the output of the attention
-            cuda.matMul.test(s.xb2, s.xb, w.l_wo, l * dim * dim, dim, dim);
+            cuda.matMul.testI8(s.xb2, s.xb, w.l_wo, l * dim * dim, dim, dim);
             // residual connection back into x
             cuda.accum.test(s.x, s.xb2, dim);
 
@@ -368,18 +332,18 @@ public class Run {
 
             cuda.memZeroFloat.test(s.tmp1, 0, 1);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
-            cuda.weightNormalizeAndScale.test(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
+            cuda.weightNormalizeAndScale.testI8(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            cuda.matMul.test(s.hb, s.xb, w.l_w1, l * dim * hidden_dim, dim, hidden_dim);
-            cuda.matMul.test(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.testI8(s.hb, s.xb, w.l_w1, l * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.testI8(s.hb2, s.xb, w.l_w3, l * dim * hidden_dim, dim, hidden_dim);
 
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
             cuda.silu.test(s.hb, s.hb2, hidden_dim);
 
             // final matmul to get the output of the ffn
-            cuda.matMul.test(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
+            cuda.matMul.testI8(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
 
             // residual connection
             cuda.accum.test(s.x, s.xb, dim);
@@ -390,10 +354,10 @@ public class Run {
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
         cuda.memZeroFloat.test(s.tmp1, 0, 1);
         cuda.sumOfSquares.test(s.tmp1, s.x, dim);
-        cuda.weightNormalizeAndScale.test(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
+        cuda.weightNormalizeAndScale.testI8(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
         // classifier into logits
-        cuda.matMul.test(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
+        cuda.matMul.testFP32(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
 //        log(pos, "s.logits", s.logits);
     }
 
@@ -432,16 +396,16 @@ public class Run {
         // use first device weight variables
 
         Pointer token_embedding_tableCU = w.token_embedding_tableCU[dev];
-        SlicePointer l_rms_att_weightCU = w.l_rms_att_weightCU[dev];
-        SlicePointer l_rms_ffn_weightCU = w.l_rms_ffn_weightCU[dev];
-        SlicePointer l_wqCU = w.l_wqCU[dev];
-        SlicePointer l_wkCU = w.l_wkCU[dev];
-        SlicePointer l_wvCU = w.l_wvCU[dev];
-        SlicePointer l_woCU = w.l_woCU[dev];
-        SlicePointer l_w1CU = w.l_w1CU[dev];
-        SlicePointer l_w2CU = w.l_w2CU[dev];
-        SlicePointer l_w3CU = w.l_w3CU[dev];
-        Pointer rms_final_weightCU = w.rms_final_weightCU[dev];
+        QuantPointer l_rms_att_weightCU = w.l_rms_att_weightCU[dev];
+        QuantPointer l_rms_ffn_weightCU = w.l_rms_ffn_weightCU[dev];
+        QuantPointer l_wqCU = w.l_wqCU[dev];
+        QuantPointer l_wkCU = w.l_wkCU[dev];
+        QuantPointer l_wvCU = w.l_wvCU[dev];
+        QuantPointer l_woCU = w.l_woCU[dev];
+        QuantPointer l_w1CU = w.l_w1CU[dev];
+        QuantPointer l_w2CU = w.l_w2CU[dev];
+        QuantPointer l_w3CU = w.l_w3CU[dev];
+        QuantPointer rms_final_weightCU = w.rms_final_weightCU[dev];
         Pointer freq_cis_realCU = w.freq_cis_realCU[dev];
         Pointer freq_cis_imagCU = w.freq_cis_imagCU[dev];
         Pointer wclsCU = w.wclsCU[dev];
@@ -523,15 +487,15 @@ public class Run {
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
 
 //            log(pos, "tmp1CU", cuda, tmp1CU, 1);
-            cuda.weightNormalizeAndScale.call(
-                    0, xbCU, xCU, l_rms_att_weightCU.withIndex(l * dim), tmp1CU, dim);
+            cuda.weightNormalizeAndScale.callI8(
+                    0, xbCU, xCU, l_rms_att_weightCU, l * dim, tmp1CU, dim);
 
             cuda.synchronizeStream(0);
 
             // qkv matmuls for this position
-            cuda.matMul.call(1, qCU, xbCU, l_wqCU.withIndex(l * dim * dim), dim, dim);
-            cuda.matMul.call(2, kCU, xbCU, l_wkCU.withIndex(l * dim * kv_dim), dim, kv_dim);
-            cuda.matMul.call(0, vCU, xbCU, l_wvCU.withIndex(l * dim * kv_dim), dim, kv_dim);
+            cuda.matMul.callI8(1, qCU, xbCU, l_wqCU, l * dim * dim, dim, dim);
+            cuda.matMul.callI8(2, kCU, xbCU, l_wkCU, l * dim * kv_dim, dim, kv_dim);
+            cuda.matMul.callI8(0, vCU, xbCU, l_wvCU, l * dim * kv_dim, dim, kv_dim);
 
             cuda.synchronizeStream(1);
             cuda.synchronizeStream(2);
@@ -604,7 +568,7 @@ public class Run {
             }
 
             // final matmul to get the output of the attention
-            cuda.matMul.call(0, xb2CU, xbCU, l_woCU, l * dim * dim, dim, dim);
+            cuda.matMul.callI8(0, xb2CU, xbCU, l_woCU, l * dim * dim, dim, dim);
             // residual connection back into x
             cuda.accum.call(0, xCU, xb2CU, dim);
 
@@ -612,17 +576,17 @@ public class Run {
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
-            cuda.weightNormalizeAndScale.call(0, xbCU, xCU, l_rms_ffn_weightCU, l * dim, tmp1CU, dim);
+            cuda.weightNormalizeAndScale.callI8(0, xbCU, xCU, l_rms_ffn_weightCU, l * dim, tmp1CU, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            cuda.matMul.call(0, hbCU, xbCU, l_w1CU, l * dim * hidden_dim, dim, hidden_dim);
-            cuda.matMul.call(0, hb2CU, xbCU, l_w3CU, l * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.callI8(0, hbCU, xbCU, l_w1CU, l * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.callI8(0, hb2CU, xbCU, l_w3CU, l * dim * hidden_dim, dim, hidden_dim);
 
             cuda.silu.call(0, hbCU, hb2CU, hidden_dim);
 
             // final matmul to get the output of the ffn
-            cuda.matMul.call(0, xbCU, hbCU, l_w2CU, l * dim * hidden_dim, hidden_dim, dim);
+            cuda.matMul.callI8(0, xbCU, hbCU, l_w2CU, l * dim * hidden_dim, hidden_dim, dim);
 
             // residual connection
             cuda.accum.call(0, xCU, xbCU, dim);
@@ -632,10 +596,10 @@ public class Run {
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
         cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
-        cuda.weightNormalizeAndScale.call(0, xCU, xCU, rms_final_weightCU, 0, tmp1CU, dim);
+        cuda.weightNormalizeAndScale.callI8(0, xCU, xCU, rms_final_weightCU, 0, tmp1CU, dim);
 
         // classifier into logits, and send in OUTPUT_STREAM
-        cuda.matMul.call(0, logitsCU, xCU, wclsCU, 0, p.dim, p.vocab_size);
+        cuda.matMul.callFP32(0, logitsCU, xCU, wclsCU, p.dim, p.vocab_size);
     }
 
     private static void log(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
@@ -709,17 +673,20 @@ public class Run {
         }
 
         Config p = new Config();
-        TransformerWeights w = null;
+        TransformerWeights w;
+
+        Quant quant = new Quant(QUANT_GROUP_SIZE, QUANT_BITS);
 
         // read in the checkpoint file
         long startModelRead = time();
         LLogger.info("Start reading checkpoint " + commandLine.getCheckpoint());
 
-        LayerAllocation layerAllocation = null;
-        Context context = null;
+        LayerAllocation layerAllocation;
+        Context context;
 
-        try (BinFileReader reader =
-                     new BinFileReader(MODELS_DIRECTORY + File.separator + commandLine.getCheckpoint())) {
+        String binFile = MODELS_DIRECTORY + File.separator + commandLine.getCheckpoint();
+
+        try (BinFileReader reader = new BinFileReader(binFile)) {
             // read in the config header
             p.dim = reader.nextInt(); // transformer dimension
             p.hidden_dim = reader.nextInt(); // for ffn layers
@@ -735,13 +702,13 @@ public class Run {
 
             LLogger.info(p.toString());
 
-            layerAllocation = new LayerAllocation(commandLine.getGpuMem(), p, mode, shared_weights);
+            layerAllocation = new LayerAllocation(commandLine.getGpuMem(), p, mode, quant, shared_weights);
 
             context = new Context(layerAllocation);
 
-            w = new TransformerWeights(context, reader, p, shared_weights);
+            w = new TransformerWeights(context, reader, MODELS_DIRECTORY, p, quant, shared_weights);
         } catch (IOException e) {
-            System.exit(1);
+            throw new RuntimeException("Initialization caused unexpected", e);
         }
 
         RunState s = new RunState(context, p);
