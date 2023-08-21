@@ -213,4 +213,12 @@ public abstract class Kernel {
 
         return n + 1;
     }
+
+    protected static float bytesToFloat(byte[] bytes, int index) {
+        int asInt = (bytes[index + 3] & 0xFF)
+                | ((bytes[index + 2] & 0xFF) << 8)
+                | ((bytes[index + 1] & 0xFF) << 16)
+                | ((bytes[index] & 0xFF) << 24);
+        return Float.intBitsToFloat(asInt);
+    }
 }
