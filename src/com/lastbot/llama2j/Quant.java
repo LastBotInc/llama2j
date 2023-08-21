@@ -53,7 +53,7 @@ public record Quant(int groupSize, int bits) {
         for (int i = 0; i < SIZE; i++) {
             d[i] = i;
         }
-        Quant quant = new Quant(Run.QUANT_CHUNK_SIZE, Run.QUANT_BITS);
+        Quant quant = new Quant(Run.QUANT_GROUP_SIZE, Run.QUANT_BITS);
         quant.testEncode(d);
     }
 
