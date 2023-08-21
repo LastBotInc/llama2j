@@ -1,47 +1,51 @@
 package com.lastbot.llama2j;
 
 public class LayerAllocation {
-    public int deviceCount;
-    public long staticBytes;
-    public long bytesPerLayer;
-    public int[] firstLayer;
-    public int[] lastLayer;
-    public int firstCPULayer = -1;
-    public int lastCPULayer = -1;
+    public final int nLayers;
+    public final int deviceCount;
+    public final long staticBytes;
+    public final long bytesPerLayer;
+    public final int[] firstLayer;
+    public final int[] lastLayer;
+    public final int firstCPULayer;
+    public final int lastCPULayer;
 
     public boolean hasCPULayers() {
         return firstCPULayer >= 0;
     }
 
-    public LayerAllocation(long[] gpuMem, Config config, Mode mode, boolean sharedWeights) {
-        long weightStatic = TransformerWeights.bytesStatic(config, sharedWeights);
-        long weightPerLayer = TransformerWeights.bytesPerLayer(config);
-        long stateStatic = RunState.bytesStatic(config);
-        long statePerLayer = RunState.bytesPerLayer(config);
+    public LayerAllocation(long[] gpuMem, Config p, Mode mode, Quant quant, boolean sharedWeights) {
+        this.nLayers = p.n_layers;
+        long weightBytesStatic = TransformerWeights.bytesStatic(p, sharedWeights);
+        long weightBytesPerLayer = TransformerWeights.bytesPerLayer(p, quant);
+        long stateStatic = RunState.bytesStatic(p);
+        long statePerLayer = RunState.bytesPerLayer(p);
 
         LLogger.info("--------- Model Size ---------");
 
-        LLogger.info("TransformerWeights: Static bytes " + String.format("%,d", weightStatic));
-        LLogger.info("TransformerWeights: Per layer bytes " + String.format("%,d", weightPerLayer));
+        LLogger.info("TransformerWeights: Static bytes " + String.format("%,d", weightBytesStatic));
+        LLogger.info("TransformerWeights: Per layer bytes " + String.format("%,d", weightBytesPerLayer));
 
         LLogger.info("RunState: Static bytes " + String.format("%,d", stateStatic));
         LLogger.info("RunState: Per layer bytes " + String.format("%,d", statePerLayer));
 
-        this.staticBytes = weightStatic + stateStatic;
-        this.bytesPerLayer = weightPerLayer + statePerLayer;
+        this.staticBytes = weightBytesStatic + stateStatic;
+        this.bytesPerLayer = weightBytesPerLayer + statePerLayer;
 
         LLogger.info("One Device: Static bytes " + String.format("%,d", staticBytes));
-        LLogger.info("One Device: Layer bytes " + String.format("%,d", config.n_layers * bytesPerLayer));
+        LLogger.info("One Device: Layer bytes " + String.format("%,d", p.n_layers * bytesPerLayer));
 
         if (mode == Mode.CPU) {
             this.deviceCount = 0;
             this.firstCPULayer = 0;
-            this.lastCPULayer = config.n_layers;
+            this.lastCPULayer = p.n_layers  - 1;
+            this.firstLayer = null;
+            this.lastLayer = null;
         } else {
             this.deviceCount = gpuMem.length;
 
             long staticSize = deviceCount * staticBytes;
-            long layerSize = config.n_layers * bytesPerLayer;
+            long layerSize = p.n_layers * bytesPerLayer;
 
             LLogger.info(deviceCount + " Devices: Static bytes " + String.format("%,d", staticSize));
             LLogger.info(deviceCount + " Devices: layer bytes " + String.format("%,d", layerSize));
@@ -76,20 +80,28 @@ public class LayerAllocation {
                 }
 
                 this.firstLayer[dev] = nextLayer;
-                this.lastLayer[dev] = Math.min(nextLayer + layersPerDevice - 1, config.n_layers - 1);
+                this.lastLayer[dev] = Math.min(nextLayer + layersPerDevice - 1, p.n_layers - 1);
                 nextLayer += layersPerDevice;
                 layerCapacity += layerBytes[dev];
             }
-            if (nextLayer < config.n_layers) {
-                firstCPULayer = nextLayer;
-                lastCPULayer = config.n_layers - 1;
+            if (mode == Mode.TEST) {
+                firstCPULayer = 0;
+                lastCPULayer = p.n_layers - 1;
+            } else // if (mode == Mode.CUDA)
+            {
+                // this version does not allow for roll over CUDA layers to CPU
+                // todo enable GPU roll over to CPU layers in CUDA mode
+                firstCPULayer = -1;
+                lastCPULayer = -1;
+//                if (nextLayer < p.n_layers) {
+//                    firstCPULayer = nextLayer;
+//                    lastCPULayer = p.n_layers - 1;
+//                }
             }
-            // todo zzz for testing only -> keep this if mode == CPU, otherwise include layers
-            // that do not fit into configured CUDA memory
-            firstCPULayer = 0;
-            lastCPULayer = config.n_layers - 1;
         }
         LLogger.info("--------- Allocation ---------");
+
+        LLogger.info("Total layers " + nLayers);
 
         if (deviceCount > 0) {
             for (int dev = 0; dev < deviceCount; dev++) {
