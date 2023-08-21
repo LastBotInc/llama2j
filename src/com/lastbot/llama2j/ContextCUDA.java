@@ -9,6 +9,7 @@ import jcuda.runtime.cudaStream_t;
 
 import java.io.Closeable;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -117,16 +118,31 @@ public class ContextCUDA implements Closeable {
         return targetDeviceArray;
     }
 
+    public Pointer allocateAndCopyToDevice(int streamId, byte[] hostArray, boolean autoFree) {
+        Pointer targetDeviceArray = allocateByteArray(hostArray.length, autoFree);
 
-    public SlicePointer allocateSliceAndCopyToDevice(int streamId, float[] hostArray, int floatOffset,
-                                                     int size, boolean autoFree) {
-        Pointer targetDeviceArray = allocateFloatArray(size, autoFree);
+        long byteSize = hostArray.length;
 
-        long byteOffset = (long) floatOffset * Float.BYTES;
+        setDevice();
 
-        Pointer hostArrayWithOffset = Pointer.to(hostArray).withByteOffset(byteOffset);
+        // Asynchronous copy from host to device
+        if (isError(cudaMemcpyAsync(targetDeviceArray, Pointer.to(hostArray), byteSize,
+                cudaMemcpyHostToDevice, streams[streamId]))) {
+            return null;
+        }
+        return targetDeviceArray;
+    }
 
-        long byteSize = (long) (size) * Sizeof.FLOAT;
+    public QuantPointer allocateQuantAndCopyToDevice(int streamId, Quant quant,
+                                                     ByteBuffer byteBuffer, int floatOffset,
+                                                     int floatSize, boolean autoFree) {
+        int byteSize = quant.numberOfBytesByFloatSize(floatSize);
+
+        Pointer targetDeviceArray = allocateByteArray(byteSize, autoFree);
+
+        int byteOffset = quant.byteOffsetByFloatIndex(floatOffset);
+
+        Pointer hostArrayWithOffset = Pointer.to(byteBuffer).withByteOffset(byteOffset);
 
         setDevice();
 
@@ -135,12 +151,12 @@ public class ContextCUDA implements Closeable {
                 cudaMemcpyHostToDevice, streams[streamId]))) {
             return null;
         }
-        SlicePointer slicePointer = new SlicePointer(targetDeviceArray, floatOffset, byteOffset, byteSize);
-        return slicePointer;
+        QuantPointer quantPointer = new QuantPointer(quant, targetDeviceArray, floatOffset);
+        return quantPointer;
     }
 
     public Pointer allocateFloatArray(long elements, boolean autoFree) {
-        if (elements <= Limits.FLOAT_ARRAY_MAX_SIZE) {
+        if (elements <= Limits.ARRAY_MAX_SIZE) {
             long byteSize = elements * Sizeof.FLOAT;
 
             setDevice();
@@ -159,34 +175,22 @@ public class ContextCUDA implements Closeable {
         }
     }
 
-    public static SlicePointer allocateAndCopyLayers(int streamId, ContextCUDA cu, float[] cpuArray,
-                                                     int firstLayer, int lastLayer, int nLayers) {
-        int floatOffset = layerFloatOffset(cpuArray, firstLayer, nLayers);
-        int floatSize = layerFloatSize(cpuArray, firstLayer, lastLayer, nLayers);
+    public Pointer allocateByteArray(long byteSize, boolean autoFree) {
+        if (byteSize <= Limits.ARRAY_MAX_SIZE) {
 
-        SlicePointer slicePointer =
-                cu.allocateSliceAndCopyToDevice(streamId, cpuArray, floatOffset, floatSize, true);
-        return slicePointer;
-    }
-
-    private static int layerFloatOffset(float[] cpuArray, int firstLayer, int nLayers) {
-        return layerFloatOffset(cpuArray.length, firstLayer, nLayers);
-    }
-
-    private static int layerFloatSize(float[] cpuArray, int firstLayer, int lastLayer, int nLayers) {
-        return layerFloatSize(cpuArray.length, firstLayer, lastLayer, nLayers);
-    }
-
-    private static int layerFloatOffset(int length, int firstLayer, int nLayers) {
-        int bytesPerLayer = length / nLayers;
-        int offset = firstLayer * bytesPerLayer;
-        return offset;
-    }
-
-    private static int layerFloatSize(int length, int firstLayer, int lastLayer, int nLayers) {
-        int bytesPerLayer = length / nLayers;
-        int size = (lastLayer - firstLayer + 1) * bytesPerLayer;
-        return size;
+            setDevice();
+            // Create device array
+            Pointer newDeviceArray = new Pointer();
+            if (isError(cudaMalloc(newDeviceArray, byteSize))) {
+                return null;
+            }
+            if (autoFree) {
+                memoryPointerList.add(newDeviceArray);
+            }
+            return newDeviceArray;
+        } else {
+            return null;
+        }
     }
 
     public Pointer allocate(long byteSize) {
@@ -247,15 +251,6 @@ public class ContextCUDA implements Closeable {
 
         // Asynchronous copy from device to device
         isError(cudaMemcpyAsync(target, source, byteSize,
-                cudaMemcpyDeviceToDevice, streams[streamId]));
-    }
-
-    public void copyBytesFromDeviceToDevice(int streamId, Pointer sourceDeviceArray, Pointer targetDeviceArray,
-                                            long byteSize) {
-        setDevice();
-
-        // Asynchronous copy from device to host
-        isError(cudaMemcpyAsync(targetDeviceArray, sourceDeviceArray, byteSize,
                 cudaMemcpyDeviceToDevice, streams[streamId]));
     }
 
