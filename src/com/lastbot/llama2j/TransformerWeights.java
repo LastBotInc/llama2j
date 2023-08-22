@@ -206,8 +206,8 @@ public class TransformerWeights {
         void process(QuantPointer[] cudaPointers, QuantArray cpuArray);
     }
 
-    private void readAsQuant(String name, BinFileReader reader, Context c, int floatSize, QuantAllocationPolicy policy, CountDownLatch latch,
-                             QuantReadProcessor processor)
+    private void readAsQuant(String name, BinFileReader reader, Context c, int floatSize, QuantAllocationPolicy policy,
+                             CountDownLatch latch, QuantReadProcessor processor)
             throws IOException {
         String quantCache = reader.getDirectory() + File.separator + reader.getBaseName() + "_" + name + quant.extension();
         Path quantCachePath = Paths.get(quantCache);
@@ -217,6 +217,7 @@ public class TransformerWeights {
             data = reader.nextFloatArray(floatSize);
         } else {
             data = null;
+            reader.skipFloats(floatSize);
         }
         Thread.ofVirtual().start(() -> {
             try {
@@ -235,7 +236,7 @@ public class TransformerWeights {
                     LLogger.info("Reading quant cache file " + quantCache);
                     try (BinFileReader cacheReader = new BinFileReader(quantCache)) {
                         int size = cacheReader.nextInt();
-                        byteBuffer = cacheReader.nextByteBufferByByteCount(size).get(0);
+                        byteBuffer = cacheReader.nextByteBufferByByteCount(size);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
