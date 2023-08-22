@@ -51,7 +51,7 @@ public class MatMul extends Kernel {
         try {
             latch.await();
         } catch (InterruptedException e) {
-            LLogger.error("fastMatmul was interrupted");
+            LLogger.error("callFP32 was interrupted");
         }
     }
 
@@ -76,50 +76,123 @@ public class MatMul extends Kernel {
 
         byte[] encoded = w.getByteArray();
 
+        int sizePerThread = d / THREAD_COUNT;
+        CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
+        for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
+            // W (d,n) @ x (n,) -> xout (d,)
+            final int start = threadId * sizePerThread;
+            final int end = Math.min(d, (threadId + 1) * sizePerThread);
+//            LLogger.debug(">>> start " + start + ", end " + end);
+            Thread.ofVirtual().start(() -> {
+                try {
+                    int weightPos;
+                    for (int i = start; i < end; i++) {
+                        weightPos = weightIndex + i * n;
+                        int[] index = new int[1];
+                        float[] val = new float[1];
+                        q.decode(encoded, weightPos, n,
+                                (value) -> {
+                                    val[0] += value * x[index[0]++];
+                                });
+
+                        if (index[0] != n) {
+                            throw new RuntimeException("index[0] != n");
+                        }
+                        xout[i] = val[0];
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            LLogger.error("callI8 was interrupted");
+        }
+        int kk = 5;
+    }
+
+    public static void callI8Simple(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
+        // W (d,n) @ x (n,) -> xout (d,)
+        Quant q = w.getQuant();
+
+        byte[] encoded = w.getByteArray();
+
         int weightPos;
-        int groupSize = q.groupSize();
         for (int i = 0; i < d; i++) {
             weightPos = weightIndex + i * n;
-            float min;
-            float max;
-            float range;
-            int groupBase;
-            int groupPayloadBase;
-            int startGroupIndex = q.groupIndexByFloatIndex(weightPos);
-            int endGroupIndex = q.groupIndexByFloatIndex(weightPos + n - 1);
+            int[] index = new int[1];
+            float[] val = new float[1];
+            q.decode(encoded, weightPos, n,
+                    (value) -> {
+                        val[0] += value * x[index[0]++];
+                    });
 
-            float val = 0.0f;
-
-            int index;
-            int count = 0;
-
-            for (int group = startGroupIndex; group <= endGroupIndex; group++) {
-                groupBase = group * q.encodedBytesPerGroup();
-//                LLogger.debug("groupBase " + groupBase + " encoded.length " + encoded.length);
-                groupPayloadBase = groupBase + 8;
-                min = bytesToFloat(encoded, groupBase);
-                max = bytesToFloat(encoded, groupBase + 4);
-                range = max - min;
-
-                int startFloatIndex = group * groupSize;
-                for (int j = 0; j < groupSize; j++) {
-                    index = startFloatIndex + j;
-                    if (index >= weightPos && index < weightPos + n) {
-//                        LLogger.debug("group " + group + " index " + index);
-                        int byteValue = encoded[groupPayloadBase + j] & 0xff;
-                        float value = byteValue / 255f * range + min;
-                        val += value * x[count];
-                        count++;
-                    }
-                }
+            if (index[0] != n) {
+                throw new RuntimeException("index[0] != n");
             }
-
-            if (count != n) {
-                throw new RuntimeException("count != n");
-            }
-            xout[i] = val;
+            xout[i] = val[0];
         }
+
     }
+
+    //    public static void callI8(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
+//        // W (d,n) @ x (n,) -> xout (d,)
+//        Quant q = w.getQuant();
+//
+//        byte[] encoded = w.getByteArray();
+//
+//        int weightPos;
+//        int groupSize = q.groupSize();
+//        for (int i = 0; i < d; i++) {
+//            weightPos = weightIndex + i * n;
+//            float min;
+//            float max;
+//            float range;
+//            int groupBase;
+//            int groupPayloadBase;
+//            int startGroupIndex = q.groupIndexByFloatIndex(weightPos);
+//            int endGroupIndex = q.groupIndexByFloatIndex(weightPos + n - 1);
+//
+//            float val = 0.0f;
+//
+//            int index;
+//            int count = 0;
+//
+//            for (int group = startGroupIndex; group <= endGroupIndex; group++) {
+//                groupBase = group * q.encodedBytesPerGroup();
+////                LLogger.debug("groupBase " + groupBase + " encoded.length " + encoded.length);
+//                groupPayloadBase = groupBase + 8;
+//                min = bytesToFloat(encoded, groupBase);
+//                max = bytesToFloat(encoded, groupBase + 4);
+//                range = max - min;
+//
+//                if (min > max) {
+//                    throw new RuntimeException("min > max");
+//                }
+//
+//                int startFloatIndex = group * groupSize;
+//                for (int j = 0; j < groupSize; j++) {
+//                    index = startFloatIndex + j;
+//                    if (index >= weightPos && index < weightPos + n) {
+////                        LLogger.debug("group " + group + " index " + index);
+//                        int byteValue = encoded[groupPayloadBase + j] & 0xff;
+//                        float value = byteValue / 255f * range + min;
+//                        val += value * x[count];
+//                        count++;
+//                    }
+//                }
+//            }
+//
+//            if (count != n) {
+//                throw new RuntimeException("count != n");
+//            }
+//            xout[i] = val;
+//        }
+//    }
 
 //    public static void callI8(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
 //        // W (d,n) @ x (n,) -> xout (d,)
