@@ -112,8 +112,8 @@ public class MatMul extends Kernel {
                         index = 0;
                         val = 0f;
 
-                        startGroupIndex = q.groupIndexByFloatIndex(weightPos);
-                        endGroupIndex = q.groupIndexByFloatIndex(weightPos + n - 1);
+                        startGroupIndex = weightPos / groupSize; // round down
+                        endGroupIndex = (weightPos + n - 1) / groupSize;
 
                         for (int group = startGroupIndex; group <= endGroupIndex; group++) {
                             groupBase = group * bytesPerGroup;
@@ -150,54 +150,8 @@ public class MatMul extends Kernel {
         } catch (InterruptedException e) {
             LLogger.error("callI8 was interrupted");
         }
-        int kk = 5;
     }
 
-    //    public static void callI8(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
-//        // W (d,n) @ x (n,) -> xout (d,)
-//        Quant q = w.getQuant();
-//
-//        byte[] encoded = w.getByteArray();
-//
-//        int sizePerThread = d / THREAD_COUNT;
-//        CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
-//        for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
-//            // W (d,n) @ x (n,) -> xout (d,)
-//            final int start = threadId * sizePerThread;
-//            final int end = Math.min(d, (threadId + 1) * sizePerThread);
-////            LLogger.debug(">>> start " + start + ", end " + end);
-//            Thread.ofVirtual().start(() -> {
-//                try {
-//                    int weightPos;
-//                    for (int i = start; i < end; i++) {
-//                        weightPos = weightIndex + i * n;
-//                        int[] index = new int[1];
-//                        float[] val = new float[1];
-//                        q.decode(encoded, weightPos, n,
-//                                (value) -> {
-//                                    val[0] += value * x[index[0]++];
-//                                });
-//
-//                        if (index[0] != n) {
-//                            throw new RuntimeException("index[0] != n");
-//                        }
-//                        xout[i] = val[0];
-//                    }
-//                } catch (Exception e) {
-//                    throw new RuntimeException(e);
-//                } finally {
-//                    latch.countDown();
-//                }
-//            });
-//        }
-//        try {
-//            latch.await();
-//        } catch (InterruptedException e) {
-//            LLogger.error("callI8 was interrupted");
-//        }
-//        int kk = 5;
-//    }
-//
     public static void callI8Simple(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
         // W (d,n) @ x (n,) -> xout (d,)
         Quant q = w.getQuant();
@@ -299,37 +253,32 @@ public class MatMul extends Kernel {
         }
     }
 
-    // continue here
-    //   make similar changes to WeightNormalizeAndScale
-    //   update calls at transformer to I8 where quants in use
-    //   test
-
     public void callI8(int streamId, Pointer xout, Pointer x, QuantPointer w, int weightIndex, int n, int d) {
         CUstream stream = cuda.getCUKernelStream(streamId);
-        int quantSize = w.getQuant().groupSize();
-        if (d % quantSize != 0) {
-            throw new RuntimeException("d % quantSize != 0");
-        }
-        if (weightIndex % quantSize != 0) {
-            throw new RuntimeException("weightIndex % quantSize != 0");
-        }
 
-        int nQuant = d / quantSize;
-        int blockSizeX = Math.min(findNextPowerOf2(nQuant), MAX_THREADS_PER_BLOCK);
-        int gridSizeX = (int) Math.ceil((double) nQuant / blockSizeX);
+        Pointer encoded = w.getPointer();
+        Quant q = w.getQuant();
 
-//        __global__ void matMul(float* xout, float* x, float* w, int weightIndex,
-//        int n, int d, int quantSize) {
+        int bytesPerGroup = q.encodedBytesPerGroup();
+        int groupSize = q.groupSize();
+
+        int blockSizeX = Math.min(findNextPowerOf2(d), MAX_THREADS_PER_BLOCK);
+        int gridSizeX = (int) Math.ceil((double) d / blockSizeX);
+
+//        __global__ void matMul(float* xout, float* x, float* encoded, int weightIndex,
+//        int groupSize, int bytesPerGroup, int n, int d ) {
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(xout),
                 Pointer.to(x),
-                Pointer.to(w.pointerOfFloatIndex(weightIndex)),
+                Pointer.to(encoded),
+                Pointer.to(new int[]{weightIndex}),
+                Pointer.to(new int[]{groupSize}),
+                Pointer.to(new int[]{bytesPerGroup}),
                 Pointer.to(new int[]{n}),
-                Pointer.to(new int[]{d}),
-                Pointer.to(new int[]{quantSize})
+                Pointer.to(new int[]{d})
         );
 
-        isError(cuLaunchKernel(kernelFP32,
+        isError(cuLaunchKernel(kernelI8,
                 gridSizeX, 1, 1,          // Grid dimension
                 blockSizeX, 1, 1,      // Block dimension
                 0, stream,  // Shared memory size and stream
@@ -343,34 +292,56 @@ public class MatMul extends Kernel {
     private CUfunction createI8() {
         String code =
                 """
-                            extern "C"
-                            __global__ void matMul(float* xout, float* x, float* w, int quantIndex,
-                                                   int n, int d, int quantSize) {
-                                int tid = blockIdx.x * blockDim.x + threadIdx.x;
-                                int quantIndex = quantIndex + quantSize * tid;
-                                float min = w[quantIndex * quantSize];
-                                float max = w[quantIndex * quantSize + 1];
-                                float range = max - min;
-                                unsigned char* data = (((unsigned char*) (w + quantIndex * quantSize)) + 8;
-                                float* weightPos = w + (quantIndex * quantSize) + i * n;
-                                
-                                for (int k = 0; k < quantSize; k++)
-                                {
-                                    int i = tid * quantSize + k;
-                                    float value;
-                                    if (i < d) {
-                                        unsigned char value = data[i];
-                                        value = value * range / 255f + min;
-                                        
-                                        float val = 0.0f;
-                                        for (int j = 0; j < n; j++) {
-                                            val += weightPos[j] * x[j];
-                                        }
-                                        xout[i] = val;
-                                    }
-                                }
-                            }
-                        """;
+                        extern "C"
+                        __global__ void matMul(float* xout, float* x, float* encoded, int weightIndex,
+                                                int groupSize, int bytesPerGroup, int n, int d ) {
+
+                             int i = blockIdx.x * blockDim.x + threadIdx.x;
+
+                             int weightPos;
+
+                             int startGroupIndex;
+                             int endGroupIndex;
+
+                             float min;
+                             float max;
+                             float range;
+                             int groupBase;
+                             int groupPayloadBase;
+                             int jj;
+
+                             int index;
+                             float val;
+
+                             int startFloatIndex;
+
+                             weightPos = weightIndex + i * n;
+                             index = 0;
+                             val = 0.0f;
+
+                             startGroupIndex = weightPos / groupSize; // round down
+                             endGroupIndex = (weightPos + n - 1) / groupSize;
+
+                             for (int group = startGroupIndex; group <= endGroupIndex; group++) {
+                                 groupBase = group * bytesPerGroup;
+                                 groupPayloadBase = groupBase + 8;
+                                 min = *((float*)(&encoded[groupBase]));
+                                 max = *((float*)(&encoded[groupBase + 4]));
+                                 range = max - min;
+
+                                 startFloatIndex = group * groupSize;
+                                 for (int j = 0; j < groupSize; j++) {
+                                     jj = startFloatIndex + j;
+                                     if (jj >= weightPos && jj < weightPos + n) {
+                                         int byteValue = encoded[groupPayloadBase + j];
+                                         float value = byteValue / 255.0f * range + min;
+                                         val += value * x[index++];
+                                     }
+                                 }
+                             }
+                             xout[i] = val;
+                         }
+                     """;
         return loadFromCode(code, "matMul");
     }
 
