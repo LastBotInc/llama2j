@@ -41,15 +41,15 @@ public class BinFileReader implements Closeable {
 
     public List<MappedByteBuffer> nextByteBufferByFloatCount(int floatCount) throws IOException {
         long bytes = (long) floatCount * Float.BYTES;
-        return nextByteBufferByByteCount(bytes);
+        return nextByteBuffer(bytes);
     }
 
     public List<MappedByteBuffer> nextByteBufferByIntCount(int intCount) throws IOException {
         long bytes = (long) intCount * Integer.BYTES;
-        return nextByteBufferByByteCount(bytes);
+        return nextByteBuffer(bytes);
     }
 
-    public List<MappedByteBuffer> nextByteBufferByByteCount(long bytes) throws IOException {
+    private List<MappedByteBuffer> nextByteBuffer(long bytes) throws IOException {
 
         List<MappedByteBuffer> buffers = new ArrayList<>();
 
@@ -67,6 +67,33 @@ public class BinFileReader implements Closeable {
             }
         }
         return buffers;
+    }
+
+    public void skipFloats(int floatSize) {
+        readSize += (long) floatSize * (long) Float.BYTES;
+    }
+
+    public ByteBuffer nextByteBufferByByteCount(int bytes) throws IOException {
+        ByteBuffer byteBuffer = ByteBuffer.allocateDirect(bytes);
+        MappedByteBuffer mappedByteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, readSize, bytes);
+        mappedByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        byteBuffer.put(mappedByteBuffer);
+        byteBuffer.flip();
+        return byteBuffer;
+    }
+
+    public byte[] nextByteArray(int byteCount) throws IOException {
+        List<MappedByteBuffer> buffers = nextByteBuffer(byteCount);
+        byte[] combinedArray = new byte[byteCount];
+
+        int arrayPos = 0;
+        for (ByteBuffer byteBuffer : buffers) {
+            int bufferSize = byteBuffer.remaining();
+            byteBuffer.get(combinedArray, arrayPos, bufferSize);
+            arrayPos += bufferSize;
+        }
+        return combinedArray;
     }
 
     public float[] nextFloatArray(int floatCount) throws IOException {
@@ -146,7 +173,7 @@ public class BinFileReader implements Closeable {
     }
 
     public String nextString(int length, Charset charset) throws IOException {
-        List<MappedByteBuffer> buffers = nextByteBufferByByteCount(length);
+        List<MappedByteBuffer> buffers = nextByteBuffer(length);
         if (buffers.size() != 1) {
             throw new RuntimeException("nextString(): buffers.size() != 1");
         }
