@@ -67,31 +67,33 @@ public class RunState implements Closeable {
     }
 
     public RunState(Context c, Config p) {
+        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
 
         long t0 = System.currentTimeMillis();
-        int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
-        x = c.cpu.allocateFloatArray(p.dim);
-        xb = c.cpu.allocateFloatArray(p.dim);
-        xb2 = c.cpu.allocateFloatArray(p.dim);
-        hb = c.cpu.allocateFloatArray(p.hidden_dim);
-        hb2 = c.cpu.allocateFloatArray(p.hidden_dim);
-        q = c.cpu.allocateFloatArray(p.dim);
-        k = c.cpu.allocateFloatArray(kv_dim);
-        v = c.cpu.allocateFloatArray(kv_dim);
-        att = c.cpu.allocateFloatArray((long) p.n_heads * p.seq_len);
-        logits = c.cpu.allocateFloatArray(p.vocab_size);
-        // we use tmp arrays to copy data from GPU to CPU to be copied to another GPU (p.dim floats), and
-        // to copy logits from GPU to CPU (p.vocab_size floats). We set the size of tmp1 and tmp2 buffers to
-        // accommodate both transfers. In addition, the tmp1CU and tmp2CU are used within transformer for smaller
-        // transfers.
-        int tmpSize = Math.max(p.dim, p.vocab_size);
-        tmp1 = c.cpu.allocateFloatArray(tmpSize);
-        tmp2 = c.cpu.allocateFloatArray(tmpSize);
+        if (c.layerAllocation.hasCPULayers()) {
+            x = c.cpu.allocateFloatArray(p.dim);
+            xb = c.cpu.allocateFloatArray(p.dim);
+            xb2 = c.cpu.allocateFloatArray(p.dim);
+            hb = c.cpu.allocateFloatArray(p.hidden_dim);
+            hb2 = c.cpu.allocateFloatArray(p.hidden_dim);
+            q = c.cpu.allocateFloatArray(p.dim);
+            k = c.cpu.allocateFloatArray(kv_dim);
+            v = c.cpu.allocateFloatArray(kv_dim);
+            att = c.cpu.allocateFloatArray((long) p.n_heads * p.seq_len);
+            logits = c.cpu.allocateFloatArray(p.vocab_size);
+            // we use tmp arrays to copy data from GPU to CPU to be copied to another GPU (p.dim floats), and
+            // to copy logits from GPU to CPU (p.vocab_size floats). We set the size of tmp1 and tmp2 buffers to
+            // accommodate both transfers. In addition, the tmp1CU and tmp2CU are used within transformer for smaller
+            // transfers.
+            int tmpSize = Math.max(p.dim, p.vocab_size);
+            tmp1 = c.cpu.allocateFloatArray(tmpSize);
+            tmp2 = c.cpu.allocateFloatArray(tmpSize);
 
-        l_key_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
-        l_value_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
-        long t1 = System.currentTimeMillis();
-        LLogger.time("Create RunState CPU", t0, t1);
+            l_key_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
+            l_value_cache = c.cpu.allocateFloatArray((long) p.n_layers * p.seq_len * kv_dim);
+            long t1 = System.currentTimeMillis();
+            LLogger.time("Create RunState CPU", t0, t1);
+        }
 
         if (c.layerAllocation.deviceCount > 0) {
             long t2 = System.currentTimeMillis();
@@ -140,8 +142,9 @@ public class RunState implements Closeable {
                 l_value_cacheCU[dev] = new SlicePointer(cu.allocateFloatArray(floatSize, true),
                         floatOffset, byteOffset, byteSize);
 
-                tmp1CU[dev] = cu.allocateFloatArray(tmp1.length, true);
-                tmp2CU[dev] = cu.allocateFloatArray(tmp1.length, true);
+                int tmpSize = Math.max(p.dim, p.vocab_size);
+                tmp1CU[dev] = cu.allocateFloatArray(tmpSize, true);
+                tmp2CU[dev] = cu.allocateFloatArray(tmpSize, true);
 
                 if (xCU[dev] == null || xbCU[dev] == null || xb2CU[dev] == null || hbCU[dev] == null ||
                         hb2CU[dev] == null || qCU[dev] == null || kCU[dev] == null || vCU[dev] == null ||
