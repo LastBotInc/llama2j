@@ -7,6 +7,7 @@ import jcuda.Sizeof;
 import jcuda.driver.CUfunction;
 
 import java.util.Arrays;
+import java.util.concurrent.CountDownLatch;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
@@ -23,15 +24,44 @@ public class AccumWeightedValue extends Kernel {
     public static void call(float[] xb, float[] att, float[] l_value_cache, int pos, int xbIndex,
                             int valueBase, int head_size, int kv_dim, int attentionIndex) {
         // weighted sum of the values, store back into xb
-        for (int t = 0; t <= pos; t++) {
+        int vIndex = valueBase;
+        float a;
+        int t;
+        int i;
+        for (t = 0; t <= pos; t++) {
             // get the value vector for this head and at this timestep
-            int vIndex = valueBase + t * kv_dim;
             // get the attention weight for this timestep
-            float a = att[attentionIndex + t];
+            a = att[attentionIndex + t];
             // accumulate the weighted value into xb
-            for (int i = 0; i < head_size; i++) {
+            for (i = 0; i < head_size; i++) {
                 xb[xbIndex + i] += a * l_value_cache[vIndex + i];
             }
+            vIndex += kv_dim;
+        }
+    }
+
+    public static void callParallel(float[] xb, float[] att, float[] l_value_cache, int pos, int xbIndex,
+                            int valueBase, int head_size, int kv_dim, int attentionIndex) {
+        CountDownLatch latch = new CountDownLatch(pos);
+        // weighted sum of the values, store back into xb
+        for (int t = 0; t <= pos; t++) {
+            int finalT = t;
+            Thread.ofVirtual().start(() -> {
+                // get the value vector for this head and at this timestep
+                int vIndex = valueBase + finalT * kv_dim;
+                // get the attention weight for this timestep
+                float a = att[attentionIndex + finalT];
+                // accumulate the weighted value into xb
+                for (int i = 0; i < head_size; i++) {
+                    xb[xbIndex + i] += a * l_value_cache[vIndex + i];
+                }
+                latch.countDown();
+            });
+        }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 
