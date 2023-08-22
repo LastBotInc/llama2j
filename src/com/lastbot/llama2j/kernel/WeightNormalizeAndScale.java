@@ -36,20 +36,23 @@ public class WeightNormalizeAndScale extends Kernel {
         byte[] encoded = w.getByteArray();
 
         int groupSize = q.groupSize();
+        int encodedBytesPerGroup = q.encodedBytesPerGroup();
+        int startGroupIndex = q.groupIndexByFloatIndex(weightIndex);
+        int endGroupIndex = q.groupIndexByFloatIndex(weightIndex + size - 1);
+        int sizeGroupIndex = endGroupIndex - startGroupIndex + 1;
+
         float min;
         float max;
         float range;
         int groupBase;
         int groupPayloadBase;
-        int startGroupIndex = q.groupIndexByFloatIndex(weightIndex);
-        int endGroupIndex = q.groupIndexByFloatIndex(weightIndex + size - 1);
 
         int index;
-        int count = 0;
+        int group;
 
-        for (int group = startGroupIndex; group <= endGroupIndex; group++) {
-            groupBase = group * q.encodedBytesPerGroup();
-//                LLogger.debug("groupBase " + groupBase + " encoded.length " + encoded.length);
+        for (int i = 0; i < sizeGroupIndex; i++) {
+            group = startGroupIndex + i;
+            groupBase = group * encodedBytesPerGroup;
             groupPayloadBase = groupBase + 8;
             min = bytesToFloat(encoded, groupBase);
             max = bytesToFloat(encoded, groupBase + 4);
@@ -58,18 +61,16 @@ public class WeightNormalizeAndScale extends Kernel {
             int startFloatIndex = group * groupSize;
             for (int j = 0; j < groupSize; j++) {
                 index = startFloatIndex + j;
-                if (index >= weightIndex && index < weightIndex + size) {
-//                        LLogger.debug("group " + group + " index " + index);
+                if (index >= weightIndex + size) {
+                    break;
+                }
+                if (index >= weightIndex) {
+                    int offset = index - weightIndex;
                     int byteValue = encoded[groupPayloadBase + j] & 0xff;
                     float value = byteValue / 255f * range + min;
-                    out[count] = value * (ss * x[count]);
-                    count++;
+                    out[offset] = value * (ss * x[offset]);
                 }
             }
-        }
-
-        if (count != size) {
-            throw new RuntimeException("count != n");
         }
     }
 
@@ -135,22 +136,35 @@ public class WeightNormalizeAndScale extends Kernel {
         }
     }
 
-    public void callI8(int streamId, Pointer out, Pointer x, QuantPointer weight, int weightIndex,
+    public void callI8(int streamId, Pointer out, Pointer x, QuantPointer w, int weightIndex,
                        Pointer sumOfSquares, int size) {
-//        __global__ void weightNormalizeAndScale(float *out, const float *x, const float *weight,
-//                    const float* sumOfSquares, const int size)
+        // W (d,n) @ x (n,) -> xout (d,)
+        Quant q = w.getQuant();
+
+        int groupSize = q.groupSize();
+        int startGroupIndex = q.groupIndexByFloatIndex(weightIndex);
+        int endGroupIndex = q.groupIndexByFloatIndex(weightIndex + size - 1);
+        int sizeGroupIndex = endGroupIndex - startGroupIndex + 1;
+        int encodedBytesPerGroup = q.encodedBytesPerGroup();
+
+//        __global__ void weightNormalizeAndScale(float *out, const float *x, const float *encoded, int weightIndex,
+//                            const float* sumOfSquares, const int startGroupIndex, const int encodedBytesPerGroup,
+//                            const int groupSize, const int size)
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(out),
                 Pointer.to(x),
-                Pointer.to(weight.getPointer()),
+                Pointer.to(w.getPointer()),
+                Pointer.to(new int[]{startGroupIndex}),
                 Pointer.to(sumOfSquares),
+                Pointer.to(new int[]{encodedBytesPerGroup}),
+                Pointer.to(new int[]{groupSize}),
                 Pointer.to(new int[]{weightIndex}),
                 Pointer.to(new int[]{size})
         );
 
         // Set up the kernel launch parameters.
-        int blockSizeX = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
-        int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
+        int blockSizeX = Math.min(findNextPowerOf2(sizeGroupIndex), MAX_THREADS_PER_BLOCK);
+        int gridSizeX = (int) Math.ceil((double) sizeGroupIndex / blockSizeX);
 
         isError(cuLaunchKernel(kernel,
                 gridSizeX, 1, 1,          // Grid dimension
@@ -167,12 +181,39 @@ public class WeightNormalizeAndScale extends Kernel {
         String code =
                 """
                             extern "C"
-                            __global__ void weightNormalizeAndScale(float *out, const float *x, const float *weight,
-                            const float* sumOfSquares, const int size)
+                            __global__ void weightNormalizeAndScale(float *out, const float *x, const float *encoded,
+                            const int weightIndex, const float* sumOfSquares, const int startGroupIndex,
+                            const int encodedBytesPerGroup, const int groupSize, const int size)
                             {
                                 int i = blockIdx.x * blockDim.x + threadIdx.x;
-                                if (i < size) {
-                                    out[i] = weight[i] * (sumOfSquares[0] * x[i]);
+                                int group = startGroupIndex + i;
+                                int groupBase = group * encodedBytesPerGroup;
+                                int groupPayloadBase = groupBase + 8;
+                                float min = *((float*)(&encoded[groupBase]));
+                                float max = *((float*)(&encoded[groupBase + 4]));
+                                float range = max - min;
+                                int index;
+                                
+                                float ss = sumOfSquares[0];
+                                printf(">>> 1");
+
+                                int startFloatIndex = group * groupSize;
+                                printf(">>> ss %.3f", ss);
+                                for (int j = 0; j < groupSize; j++) {
+                                    index = startFloatIndex + j;
+                                    if (index >= weightIndex + size) {
+                                        break;
+                                    }
+                                    if (index >= weightIndex) {
+                                        int offset = index - weightIndex;
+                                printf(">>> 2");
+                                        unsigned char byteValue = encoded[groupPayloadBase + j];
+                                printf(">>> 3");
+                                        float value = byteValue / 255.0f * range + min;
+                                printf(">>> 4");
+                                        out[offset] = value * (ss * x[offset]);
+                                printf(">>> 5");
+                                    }
                                 }
                             }
                         """;
