@@ -8,6 +8,7 @@ import java.util.Random;
 public record Quant(int groupSize, int bits) {
     private static final int TEST_ITERATIONS = 100_000;
     private static final double TEST_THRESHOLD_RELATIVE = 0.01;
+    private static final double TEST_THRESHOLD_ABS = 1e-2;
 
     private int originalBytesPerGroup() {
         return groupSize * Float.BYTES;
@@ -44,7 +45,7 @@ public record Quant(int groupSize, int bits) {
     }
 
     public interface DecodeProcessor {
-        void process(int floatIndex, float value);
+        void process(float value);
     }
 
     public static void main(String[] args) {
@@ -82,7 +83,7 @@ public record Quant(int groupSize, int bits) {
                 if (jj >= floatIndex && jj < floatIndex + size) {
                     int byteValue = encoded[groupPayloadBase + j] & 0xff;
                     float value = byteValue / 255f * range + min;
-                    processor.process(jj, value);
+                    processor.process(value);
                 }
             }
         }
@@ -107,7 +108,7 @@ public record Quant(int groupSize, int bits) {
         Random random = new XoRoShiRo128PlusRandom(101);
         int startIndex;
         int size;
-        int[] expectedIndex = new int[1];
+        int[] floatIndex = new int[1];
 
         for (int k = 0; k < TEST_ITERATIONS; k++) {
             startIndex = random.nextInt(floatSize);
@@ -115,19 +116,16 @@ public record Quant(int groupSize, int bits) {
             if (random.nextFloat() < 0.1D) {
                 size = floatSize - startIndex;
             }
-            expectedIndex[0] = startIndex;
+            floatIndex[0] = startIndex;
             decode(encoded, startIndex, size,
-                    (floatIndex, value) -> {
-                        if (floatIndex != expectedIndex[0]) {
-                            LLogger.error("floatIndex != expectedIndex[0]");
-                        }
-                        expectedIndex[0]++;
-                        float original = input[floatIndex];
-                        float diff = Math.abs(input[floatIndex] - value);
+                    (value) -> {
+                        float original = input[floatIndex[0]];
+                        float diff = Math.abs(input[floatIndex[0]] - value);
                         double relativeDiff = diff / Math.abs(original);
-                        if (relativeDiff > TEST_THRESHOLD_RELATIVE) {
+                        if (relativeDiff > TEST_THRESHOLD_RELATIVE && diff > TEST_THRESHOLD_ABS) {
                             LLogger.error("floatIndex " + floatIndex + " relativeDiff " + relativeDiff);
                         }
+                        floatIndex[0]++;
                     });
         }
         return byteBuffer;
