@@ -168,7 +168,6 @@ public class Run {
                 // todo zzz consider removing zeroing and integrating that into AccumWeightedValue
                 // feasibility depends on if the performance will be worse if we switch the inner and outer loops
                 int xbIndex = h * head_size;
-                MemZeroFloat.call(s.xb, xbIndex, head_size);
 
                 int valueBase = loff + (h / kv_mul) * head_size;
                 AccumWeightedValue.call(s.xb, s.att, s.l_value_cache, pos, xbIndex,
@@ -254,7 +253,6 @@ public class Run {
 
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            cuda.memZeroFloat.test(s.tmp1, 0, 1);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
 
 //            if (l == 0) {
@@ -314,7 +312,6 @@ public class Run {
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
-                cuda.memZeroFloat.test(s.xb, xbIndex, head_size);
 
                 int valueBase = loff + (h / kv_mul) * head_size;
                 cuda.accumWeightedValue.test(s.xb, s.att, s.l_value_cache, pos, xbIndex,
@@ -329,7 +326,6 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            cuda.memZeroFloat.test(s.tmp1, 0, 1);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
             cuda.weightNormalizeAndScale.testI8(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
@@ -351,7 +347,6 @@ public class Run {
 
         // final rmsnorm
 //        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        cuda.memZeroFloat.test(s.tmp1, 0, 1);
         cuda.sumOfSquares.test(s.tmp1, s.x, dim);
         cuda.weightNormalizeAndScale.testI8(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
