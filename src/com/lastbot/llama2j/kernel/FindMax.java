@@ -2,6 +2,7 @@ package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
 import jcuda.Pointer;
+import jcuda.Sizeof;
 import jcuda.driver.CUfunction;
 import jcuda.driver.CUstream;
 
@@ -10,21 +11,19 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class FindMax extends Kernel {
-    private static final int SMALL_KERNEL = MAX_THREADS_PER_BLOCK;
-    private static final int LARGE_KERNEL = 1024 * 1024;
+    public static final int BLOCK_SIZE = 256;
+    private static final int SIMPLE_KERNEL_THRESHOLD = 8;
 
     private final ContextCUDA cuda;
 
-    private final CUfunction smallKernel;
-    private final CUfunction largeLocalMaxKernel;
-    private final CUfunction largeReductionKernel;
+    private final CUfunction simpleKernel;
+    private final CUfunction findMaxKernel;
 
     public FindMax(ContextCUDA cuda) {
         super(cuda, "findMax");
         this.cuda = cuda;
-        smallKernel = createSmall();
-        largeLocalMaxKernel = createLargeLocalMax();
-        largeReductionKernel = createLargeReduction();
+        simpleKernel = createSimple();
+        findMaxKernel = createFindMax();
     }
 
     public static void call(float[] max, float[] x, int index, int size) {
@@ -43,198 +42,132 @@ public class FindMax extends Kernel {
         Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
         call(TEST_STREAM, pMax, px, index, size);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pMax, max);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pMax, max.length, max);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pMax);
         cuda.free(px);
 
         call(copyOfMax, x, index, size);
 
-        compareWithThreshold("FindMax.call (" + (size <= SMALL_KERNEL ? "small" : "large") +
-                        ") max ",
+        compareWithThreshold("FindMax.call max (size " + size + ")",
                 max, copyOfMax, 1e-2f);
     }
 
     public void call(int streamId, Pointer max, Pointer x, int index, int size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
-        if (size <= SMALL_KERNEL) {
-            int blockSizeX = findNextPowerOf2(size);
-            int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
-            int sharedMemory = blockSizeX * Float.BYTES;
 
-//            __global__ void findMax(float *max, float *x, int index, int size) {
+        if (size == 1) {
+            cuda.copyFloatsFromDeviceToDevice(streamId, x, index, max, 0, 1);
+        } else if (size < SIMPLE_KERNEL_THRESHOLD) {
+//            _global__ void simpleMax(float* input, int inputIndex, int inputSize,
+//            float* max, int maxIndex) {
             Pointer kernelParameters = Pointer.to(
-                    Pointer.to(max),
                     Pointer.to(x),
                     Pointer.to(new int[]{index}),
-                    Pointer.to(new int[]{size})
+                    Pointer.to(new int[]{size}),
+                    Pointer.to(max),
+                    Pointer.to(new int[]{0})
             );
-
-            isError(cuLaunchKernel(smallKernel,
-                    gridSizeX, 1, 1,         // Grid dimension
-                    blockSizeX, 1, 1,      // Block dimension
-                    sharedMemory, stream,  // Shared memory size and stream
+            isError(cuLaunchKernel(simpleKernel,
+                    1, 1, 1,          // Grid dimension
+                    1, 1, 1,      // Block dimension
+                    0, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
             ));
             if (SYNC_KERNEL_CALLS) {
                 cuda.synchronizeStream(streamId);
             }
-        } else if (size <= LARGE_KERNEL) {
-            int threadsPerBlock = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
-            int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
-            Pointer blockMax = cuda.allocate((long) blocksPerGrid * Float.BYTES);
-            // exp and sum
-            {
-                int sharedMemory = threadsPerBlock * Float.BYTES;
-                int blockSizeX = threadsPerBlock;
-                int gridSizeX = blocksPerGrid;
-
-//                __global__ void localMax(float *blockMax, float *x, int size) {
-                Pointer kernelParameters = Pointer.to(
-                        Pointer.to(blockMax),
-                        Pointer.to(x),
-                        Pointer.to(new int[]{size})
-                );
-                isError(cuLaunchKernel(largeLocalMaxKernel,
-                        gridSizeX, 1, 1,          // Grid dimension
-                        blockSizeX, 1, 1,      // Block dimension
-                        sharedMemory, stream,  // Shared memory size and stream
-                        kernelParameters, null // Kernel- and extra parameters
-                ));
-                if (SYNC_KERNEL_CALLS) {
-                    cuda.synchronizeStream(streamId);
-                }
+        } else { // parallel
+//            _global__ void findMax(float *d_input, float *d_output, int index, int size) {
+            Pointer kernelParameters = Pointer.to(
+                    Pointer.to(x),
+                    Pointer.to(new int[]{index}),
+                    Pointer.to(new int[]{size}),
+                    Pointer.to(max),
+                    Pointer.to(new int[]{0})
+            );
+            isError(cuLaunchKernel(findMaxKernel,
+                    (size + BLOCK_SIZE - 1) / BLOCK_SIZE, 1, 1,          // Grid dimension
+                    BLOCK_SIZE, 1, 1,      // Block dimension
+                    BLOCK_SIZE * Sizeof.FLOAT, stream,  // Shared memory size and stream
+                    kernelParameters, null // Kernel- and extra parameters
+            ));
+            if (SYNC_KERNEL_CALLS) {
+                cuda.synchronizeStream(streamId);
             }
-            // reduction
-            {
-                int blockSizeX = findNextPowerOf2(blocksPerGrid);
-                int gridSizeX = (int) Math.ceil((double) blocksPerGrid / blockSizeX);
-                int sharedMemory = blockSizeX * Float.BYTES;
-
-//                __global__ void maxReduction(float *max, float *blockMax, int blocksPerGrid) {
-                Pointer kernelParameters = Pointer.to(
-                        Pointer.to(max),
-                        Pointer.to(blockMax),
-                        Pointer.to(new int[]{blocksPerGrid})
-                );
-                isError(cuLaunchKernel(largeReductionKernel,
-                        gridSizeX, 1, 1,          // Grid dimension
-                        blockSizeX, 1, 1,      // Block dimension
-                        sharedMemory, stream,  // Shared memory size and stream
-                        kernelParameters, null // Kernel- and extra parameters
-                ));
-                if (SYNC_KERNEL_CALLS) {
-                    cuda.synchronizeStream(streamId);
-                }
-            }
-            cuda.free(blockMax);
-        } else {
-            throw new RuntimeException("ExpAndSum.call with too large size" + size);
         }
     }
 
-    private CUfunction createSmall() {
+    private CUfunction createSimple() {
         String code =
                 """
-                        #include <cfloat>
-                        extern "C"
-                        __global__ void findMax(float *max, float *x, int index, int size) {
-                            int tid = threadIdx.x;
-                            int blockSize = blockDim.x;
-                            extern __shared__ float sdata[];
-
-                            if(tid < size) {
-                                sdata[tid] = x[index + tid];
-                            } else {
-                                // Fill remaining shared memory with lowest possible value
-                                sdata[tid] = -FLT_MAX;
-                            }
-                            __syncthreads(); // Make sure the shared memory is populated
-
-                            // Binary tree reduction
-                            for (int stride = blockSize / 2; stride > 0; stride >>= 1) {
-                                if (tid < stride && tid + stride < size) {
-                                    sdata[tid] = fmaxf(sdata[tid], sdata[tid + stride]);
+                            #include <cfloat>
+                            
+                            extern "C"
+                            __global__ void simpleMax(float* d_input, int inputIndex, int inputSize,
+                                                      float* max, int maxIndex) {
+                                float myMax = d_input[inputIndex];
+                                for (int i = inputIndex + 1; i < inputIndex + inputSize; i++) {
+                                    myMax = fmaxf(myMax, d_input[i]);
                                 }
-                                __syncthreads();
+                                max[maxIndex] = myMax;
                             }
 
-                            // Write result to global memory
-                            if(tid == 0) {
-                                max[0] = sdata[0];
-                            }
+                        """;
+        return loadFromCode(code, "simpleMax");
+    }
+
+    private CUfunction createFindMax() {
+        String code =
+                """
+                         #include <cfloat>
+
+                         #define BLOCK_SIZE <BLOCK_SIZE>
+
+                        __device__ void atomicMaxf(float* address, float val) {
+                              int* address_as_int = (int*)address;
+                              int old = *address_as_int, assumed;
+                              while (val > __int_as_float(old)) {
+                                  assumed = old;
+                                  old = atomicCAS(address_as_int, assumed, __float_as_int(val));
+                                  if (old == assumed)
+                                      break;
+                              }
+                          }
+                         
+                         extern "C"
+                        __global__ void findMax(float* d_input, int inputIndex, int inputSize,
+                                                      float* max, int maxIndex) {
+                                 extern __shared__ float sdata[];
+                             
+                                 int tid = threadIdx.x;
+                                 int i = inputIndex + blockIdx.x * blockDim.x + threadIdx.x;
+                             
+                                 if (tid == 0) {
+                                     max[maxIndex] = -FLT_MAX;
+                                 }
+                                 __syncthreads();
+
+                                 float myMax = (i >= inputIndex && i < (inputIndex + inputSize)) ? d_input[i] : -FLT_MAX;
+                             
+                                 sdata[tid] = myMax;
+                                 __syncthreads();
+                             
+                                 // Standard reduction in shared memory
+                                 for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+                                     if (tid < s) {
+                                         sdata[tid] = fmaxf(sdata[tid], sdata[tid + s]);
+                                     }
+                                     __syncthreads();
+                                 }
+                             
+                                 // Only thread 0 writes result for this block to global mem
+                                 if (tid == 0) {
+                                     atomicMaxf(max + maxIndex, sdata[0]);
+                                 }
                         }
-                 """;
+                                  """;
+        code = code.replaceAll("<BLOCK_SIZE>", Integer.toString(BLOCK_SIZE));
         return loadFromCode(code, "findMax");
-    }
-
-    private CUfunction createLargeLocalMax() {
-        String code =
-                """
-                        #include <cfloat>
-                        extern "C"
-                        __global__ void localMax(float *blockMax, float *x, int size) {
-                            int tid = threadIdx.x;
-                            int blockSize = blockDim.x;
-                            int globalId = blockIdx.x * blockSize + tid;
-                            extern __shared__ float sdata[];
-
-                            if(globalId < size) {
-                                sdata[tid] = x[globalId];
-                            } else {
-                                // Fill remaining shared memory with lowest possible value
-                                sdata[tid] = -FLT_MAX;
-                            }
-                            __syncthreads(); // Make sure the shared memory is populated
-
-                            // Binary tree reduction
-                            for (int stride = blockSize / 2; stride > 0; stride >>= 1) {
-                                if (tid < stride && (threadIdx.x + stride) < blockDim.x) {
-                                    sdata[tid] = fmaxf(sdata[tid], sdata[tid + stride]);
-                                }
-                                __syncthreads();
-                            }
-
-                            // Write the local maximum of each block to global memory
-                            if(tid == 0) {
-                                blockMax[blockIdx.x] = sdata[0];
-                            }
-                        }
-                """;
-        return loadFromCode(code, "localMax");
-    }
-
-    private CUfunction createLargeReduction() {
-        String code =
-                """
-                        #include <cfloat>
-                        extern "C"
-                        __global__ void maxReduction(float *max, float *blockMax, int blocksPerGrid) {
-                            extern __shared__ float sdata[];
-                        
-                            int tid = threadIdx.x;
-                        
-                            if(tid < blocksPerGrid) {
-                                sdata[tid] = blockMax[tid];
-                            } else {
-                                sdata[tid] = -FLT_MAX;
-                            }
-                            __syncthreads();
-                        
-                            // Binary tree reduction
-                            for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                if (tid < stride && tid + stride < blocksPerGrid) {
-                                    sdata[tid] = fmaxf(sdata[tid], sdata[tid + stride]);
-                                }
-                                __syncthreads();
-                            }
-                        
-                            // Write the global maximum to global memory
-                            if(tid == 0) {
-                                max[0] = sdata[0];
-                            }
-                        }
-                """;
-        return loadFromCode(code, "maxReduction");
     }
 }
