@@ -44,13 +44,15 @@ public class AttentionLoop extends Kernel {
         Pointer pL_key_cache = cuda.allocateAndCopyToDevice(
                 TEST_STREAM, l_key_cache, false);
         Pointer pAtt = cuda.allocateAndCopyToDevice(TEST_STREAM, att, false);
+        Pointer tmp = cuda.allocate(Sizeof.FLOAT);
         cuda.synchronizeStream(TEST_STREAM);
-        call(TEST_STREAM, pq, pL_key_cache, pAtt, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
+        call(TEST_STREAM, pq, pL_key_cache, pAtt, tmp, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.copyFromDeviceToHost(TEST_STREAM, pAtt, att.length, att);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pq);
         cuda.free(pL_key_cache);
+        cuda.free(tmp);
 
         call(q, l_key_cache, copyOfAtt, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
 
@@ -58,19 +60,20 @@ public class AttentionLoop extends Kernel {
                 att, copyOfAtt, 1e-5f);
     }
 
-    public void call(int streamId, Pointer q, Pointer l_key_cache, Pointer att, int attentionIndex, int keybase,
-                     int kv_dim, int queryIndex, int pos, int head_size) {
+    public void call(int streamId, Pointer q, Pointer l_key_cache, Pointer att, Pointer max, int attentionIndex,
+                     int keybase, int kv_dim, int queryIndex, int pos, int head_size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
         int size = pos + 1;
         int blockSizeX = findNextPowerOf2(size);
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
-//        __global__ void attentionLoop(float* q, float* l_key_cache, float* att,
+//        __global__ void attentionLoop(float* q, float* l_key_cache, float* att, float* max,
 //        int attentionIndex, int keybase, int kv_dim, int pos, int head_size) {
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(q.withByteOffset((long) queryIndex * Sizeof.FLOAT)),
                 Pointer.to(l_key_cache),
                 Pointer.to(att),
+                Pointer.to(max),
                 Pointer.to(new int[]{attentionIndex}),
                 Pointer.to(new int[]{keybase}),
                 Pointer.to(new int[]{kv_dim}),
@@ -92,8 +95,9 @@ public class AttentionLoop extends Kernel {
     private CUfunction create() {
         String code =
                 """
+                            #include <cfloat>
                             extern "C"
-                            __global__ void attentionLoop(float* q, float* l_key_cache, float* att,
+                            __global__ void attentionLoop(float* q, float* l_key_cache, float* att, float* max,
                             int attentionIndex, int keybase, int kv_dim, int pos, int head_size) {
                                     int t = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -102,12 +106,17 @@ public class AttentionLoop extends Kernel {
                                         // get the key vector for this head and at this timestep
                                         // calculate the attention score as the dot product of q and k
                                         int keyIndex = keybase + t * kv_dim;
+                                        float value;
                                         float score = 0.0f;
+                                        float headMax = -FLT_MAX;
                                         for (int i = 0; i < head_size; i++) {
-                                            score += q[i] * l_key_cache[keyIndex + i];
+                                            value = q[i] * l_key_cache[keyIndex + i];
+                                            score += value;
+                                            headMax = fmaxf(headMax, value);
                                         }
                                         // save the score to the attention buffer
                                         att[attentionIndex + t] = score / (float) sqrtf(head_size);
+                                        max[0] = headMax;
                                     }
                                 }
                         """;
