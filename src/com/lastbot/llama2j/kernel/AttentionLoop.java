@@ -21,23 +21,34 @@ public class AttentionLoop extends Kernel {
         kernel = create();
     }
 
-    public static void call(float[] q, float[] l_key_cache, float[] att, int attentionIndex,
+    public static void call(float[] q, float[] l_key_cache, float[] att, float[] max, int attentionIndex,
                             int keybase, int kv_dim, int queryIndex, int pos, int head_size) {
         // iterate over all timesteps, including the current one
-        for (int t = 0; t <= pos; t++) {
+        float headMax = -Float.MAX_VALUE;
+        int t;
+        int i;
+        float value;
+        float score;
+        for (t = 0; t <= pos; t++) {
             // get the key vector for this head and at this timestep
             // calculate the attention score as the dot product of q and k
             int keyIndex = keybase + t * kv_dim;
-            float score = 0.0f;
-            for (int i = 0; i < head_size; i++) {
-                score += q[queryIndex + i] * l_key_cache[keyIndex + i];
+            score = 0.0f;
+            for (i = 0; i < head_size; i++) {
+                value = q[queryIndex + i] * l_key_cache[keyIndex + i];
+                score += value;
+                headMax = Math.max(headMax, value);
             }
             // save the score to the attention buffer
             att[attentionIndex + t] = score / (float) Math.sqrt(head_size);
+            // store max if needed
+            if (max != null) {
+                max[0] = Math.max(max[0], headMax);
+            }
         }
     }
 
-    public void test(float[] q, float[] l_key_cache, float[] att, int attentionIndex,
+    public void test(float[] q, float[] l_key_cache, float[] att, float[] max, int attentionIndex,
                      int keybase, int kv_dim, int queryIndex, int pos, int head_size) {
         float[] copyOfAtt = Arrays.copyOf(att, att.length);
         Pointer pq = cuda.allocateAndCopyToDevice(TEST_STREAM, q, false);
@@ -54,7 +65,7 @@ public class AttentionLoop extends Kernel {
         cuda.free(pL_key_cache);
         cuda.free(tmp);
 
-        call(q, l_key_cache, copyOfAtt, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
+        call(q, l_key_cache, copyOfAtt, max, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
 
         compareWithThreshold("AttentionLoop.call att ",
                 att, copyOfAtt, 1e-5f);
@@ -96,6 +107,19 @@ public class AttentionLoop extends Kernel {
         String code =
                 """
                             #include <cfloat>
+
+                            __device__ float atomicMax(float* address, float value) {
+                                float old = *address, assumed;
+                                do {
+                                    assumed = old;
+                                    if (assumed >= value) break; // No need to swap if the stored value is already larger
+                                    old = __int_as_float(atomicCAS((unsigned int*)address,
+                                                                    __float_as_int(assumed),
+                                                                    __float_as_int(value)));
+                                } while (assumed != old);
+                                return old;
+                            }
+
                             extern "C"
                             __global__ void attentionLoop(float* q, float* l_key_cache, float* att, float* max,
                             int attentionIndex, int keybase, int kv_dim, int pos, int head_size) {
@@ -116,7 +140,7 @@ public class AttentionLoop extends Kernel {
                                         }
                                         // save the score to the attention buffer
                                         att[attentionIndex + t] = score / (float) sqrtf(head_size);
-                                        max[0] = headMax;
+                                        atomicMax(max, headMax);
                                     }
                                 }
                         """;
