@@ -83,7 +83,6 @@ public class Run {
         for (int l = 0; l < p.n_layers; l++) {
             // attention rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-//            MemZeroFloat.call(s.tmp1, 0, 1);
             SumOfSquares.call(s.tmp1, s.x, dim);
 
             WeightNormalizeAndScale.callI8(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
@@ -392,6 +391,7 @@ public class Run {
 
         Pointer tmp1CU = s.tmp1CU[dev];
         Pointer tmp2CU = s.tmp2CU[dev];
+        Pointer tmp3CU = s.tmp3CU[dev];
 
         // use first device weight variables
 
@@ -428,8 +428,6 @@ public class Run {
                 // do not copy layer specific state that remains in the current device
                 // both source and destination use 0 streamId
 
-                // newCuda.synchronizeStream(0);
-
                 cuda.copyFromDeviceToAnotherDevice(0, xCU, s.xCU[dev], newCuda, 0, dim, s.tmp1);
 
                 // roll over to new device state variables
@@ -450,6 +448,7 @@ public class Run {
 
                 tmp1CU = s.tmp1CU[dev];
                 tmp2CU = s.tmp2CU[dev];
+                tmp3CU = s.tmp3CU[dev];
 
                 // roll over to new device weight variables (no need to copy anything)
 
@@ -481,15 +480,15 @@ public class Run {
             cuda.weightNormalizeAndScale.callI8(
                     0, xbCU, xCU, l_rms_att_weightCU, l * dim, tmp1CU, dim);
 
-            cuda.synchronizeStream(0);
+//            cuda.synchronizeStream(0);
 
             // qkv matmuls for this position
-            cuda.matMul.callI8(1, qCU, xbCU, l_wqCU, l * dim * dim, dim, dim);
-            cuda.matMul.callI8(2, kCU, xbCU, l_wkCU, l * dim * kv_dim, dim, kv_dim);
+            cuda.matMul.callI8(0, qCU, xbCU, l_wqCU, l * dim * dim, dim, dim);
+            cuda.matMul.callI8(0, kCU, xbCU, l_wkCU, l * dim * kv_dim, dim, kv_dim);
             cuda.matMul.callI8(0, vCU, xbCU, l_wvCU, l * dim * kv_dim, dim, kv_dim);
 
-            cuda.synchronizeStream(1);
-            cuda.synchronizeStream(2);
+//            cuda.synchronizeStream(1);
+//            cuda.synchronizeStream(2);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             cuda.applyRope.call(0, qCU, kCU, freq_cis_realCU, freq_cis_imagCU,
@@ -519,17 +518,20 @@ public class Run {
                 int keyBase = loff + (h / kv_mul) * head_size -
                         (int) l_key_cacheCU.floatOffset();
 
-                int streamId = h % ContextCUDA.STREAM_COUNT;
-                if (streamId > maxStream) {
-                    maxStream = streamId;
-                }
+                int streamId = 0;
+//                int streamId = h % ContextCUDA.STREAM_COUNT;
+//                if (streamId > maxStream) {
+//                    maxStream = streamId;
+//                }
 
                 cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU,
                         attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
+//                cuda.attentionLoop.call(0, qCU, l_key_cacheCU.pointer(), attCU,
+//                        attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
             }
-            for (int streamId = 1; streamId <= maxStream; streamId++) {
-                cuda.synchronizeStream(streamId);
-            }
+//            for (int streamId = 1; streamId <= maxStream; streamId++) {
+//                cuda.synchronizeStream(streamId);
+//            }
 
             for (h = 0; h < p.n_heads; h++) {
                 int attentionIndex = h * p.seq_len;
@@ -537,21 +539,16 @@ public class Run {
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-                // zzz redundant ?
-//                cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
                 cuda.findMax.call(0, tmp1CU, attCU, attentionIndex, pos + 1);
 
                 // exp and sum
-                // zzz redundant ?
-//                cuda.memZeroFloat.call(0, tmp2CU, 0, 1);
-                cuda.expAndSum.call(0, tmp2CU, attCU, tmp1CU, attentionIndex, pos + 1);
+                cuda.expAndSum.call(0, tmp2CU, attCU, tmp1CU, tmp3CU, attentionIndex, pos + 1);
 
                 // normalize
                 cuda.normalize.call(0, attCU, tmp2CU, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
-                cuda.memZeroFloat.call(0, xbCU, xbIndex, head_size);
 
                 int valueBase = loff + (h / kv_mul) * head_size;
                 cuda.accumWeightedValue.call(0, xbCU, attCU, l_value_cacheCU, pos, xbIndex,
@@ -818,7 +815,7 @@ public class Run {
 
         // report achieved tok/s
         if (pos > 1) {
-            LLogger.debug("\nachieved tok/s: " + String.format("%.1f", (pos - 1) / (double) (end - start) * 1000));
+            LLogger.debug("\nachieved tok/s: " + String.format("%.2f", (pos - 1) / (double) (end - start) * 1000));
         }
     }
 }
