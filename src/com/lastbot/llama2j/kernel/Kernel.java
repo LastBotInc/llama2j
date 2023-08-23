@@ -22,7 +22,7 @@ import static jcuda.runtime.JCuda.cudaGetErrorString;
 import static jcuda.runtime.cudaError.cudaSuccess;
 
 public abstract class Kernel {
-    protected final boolean SYNC_KERNEL_CALLS = true;
+    protected final boolean SYNC_KERNEL_CALLS = false;
 
     protected final ContextCUDA cuda;
 
@@ -34,15 +34,12 @@ public abstract class Kernel {
     private static final String CUDA_SOURCE_EXTENSION = ".cu";
     private static final String CUBIN_EXTENSION = ".cubin";
 
-    //    private static final String CUDA_DIR = "/usr/local/cuda-12.2";
     private static final String CUDA_DIR = "/usr/local/cuda-12.0";
     private static final String NVCC_PATH = CUDA_DIR + File.separator + "bin" + File.separator + "nvcc";
     private static final String CUDA_ARCHITECTURE = "compute_89";
     private static final String CUDA_CODE = "sm_89";
 
     protected final int TEST_STREAM = ContextCUDA.TEST_STREAM;
-
-    public static final int MAX_THREADS_PER_BLOCK = 64;
 
     private final Map<KernelSize, CUfunction> functionByKernelSizeMap = new HashMap<>();
 
