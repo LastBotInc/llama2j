@@ -12,10 +12,11 @@ import java.util.concurrent.CountDownLatch;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class MatMul extends Kernel {
+    public static final int BLOCK_SIZE = 64;
+    public static final int THREAD_COUNT = 32;
+
     private final CUfunction kernelFP32;
     private final CUfunction kernelI8;
-
-    public static final int THREAD_COUNT = 32;
 
     public MatMul(ContextCUDA cuda) {
         super(cuda, "matMul");
@@ -87,7 +88,6 @@ public class MatMul extends Kernel {
             // W (d,n) @ x (n,) -> xout (d,)
             final int start = threadId * sizePerThread;
             final int end = Math.min(d, (threadId + 1) * sizePerThread);
-//            LLogger.debug(">>> start " + start + ", end " + end);
             Thread.ofVirtual().start(() -> {
                 try {
                     int weightPos;
@@ -185,7 +185,7 @@ public class MatMul extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         callFP32(TEST_STREAM, pXout, px, pw, weightIndex, n, d);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pXout, xout);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pXout, xout.length, xout);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pXout);
         cuda.free(px);
@@ -202,11 +202,12 @@ public class MatMul extends Kernel {
         float[] copyOfx = Arrays.copyOf(x, x.length);
         Pointer pXout = cuda.allocateAndCopyToDevice(TEST_STREAM, xout, false);
         Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
+        Quant q = w.getQuant();
         Pointer pw = cuda.allocateAndCopyToDevice(TEST_STREAM, w.getByteArray(), false);
         cuda.synchronizeStream(TEST_STREAM);
-        callFP32(TEST_STREAM, pXout, px, pw, weightIndex, n, d);
+        callI8(TEST_STREAM, pXout, px, pw, q, weightIndex, n, d);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pXout, xout);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pXout, xout.length, xout);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pXout);
         cuda.free(px);
@@ -230,7 +231,7 @@ public class MatMul extends Kernel {
 
     public void callFP32(int streamId, Pointer xout, Pointer x, Pointer w, int n, int d) {
         CUstream stream = cuda.getCUKernelStream(streamId);
-        int blockSizeX = Math.min(findNextPowerOf2(d), MAX_THREADS_PER_BLOCK);
+        int blockSizeX = Math.min(findNextPowerOf2(d), BLOCK_SIZE);
         int gridSizeX = (int) Math.ceil((double) d / blockSizeX);
 
 //        __global__ void matMul(float* xout, float* x, float* w, int n, int d) {
@@ -254,15 +255,25 @@ public class MatMul extends Kernel {
     }
 
     public void callI8(int streamId, Pointer xout, Pointer x, QuantPointer w, int weightIndex, int n, int d) {
-        CUstream stream = cuda.getCUKernelStream(streamId);
-
         Pointer encoded = w.getPointer();
         Quant q = w.getQuant();
+        if ((long)weightIndex - w.getFloatOffset() < 0) {
+            throw new RuntimeException("(long)weightIndex - w.getFloatOffset() < 0)");
+        }
+        if ((long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE) {
+            throw new RuntimeException("(long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE");
+        }
+        int adjustedWeightIndex = (int) (weightIndex - w.getFloatOffset());
+        callI8(streamId, xout, x, encoded, q, adjustedWeightIndex, n, d);
+    }
+
+    public void callI8(int streamId, Pointer xout, Pointer x, Pointer encoded, Quant q, int weightIndex, int n, int d) {
+        CUstream stream = cuda.getCUKernelStream(streamId);
 
         int bytesPerGroup = q.encodedBytesPerGroup();
         int groupSize = q.groupSize();
 
-        int blockSizeX = Math.min(findNextPowerOf2(d), MAX_THREADS_PER_BLOCK);
+        int blockSizeX = Math.min(findNextPowerOf2(d), BLOCK_SIZE);
         int gridSizeX = (int) Math.ceil((double) d / blockSizeX);
 
 //        __global__ void matMul(float* xout, float* x, float* encoded, int weightIndex,
@@ -293,63 +304,135 @@ public class MatMul extends Kernel {
         String code =
                 """
                         extern "C"
-                        __global__ void matMul(float* xout, float* x, float* encoded, int weightIndex,
-                                                int groupSize, int bytesPerGroup, int n, int d ) {
+                          __global__  void matMulI8(float* xout, float* x, unsigned char* encoded, int weightIndex,
+                                                   int groupSize, int bytesPerGroup, int n, int d ) {
 
-                             int i = blockIdx.x * blockDim.x + threadIdx.x;
+                                int i = blockIdx.x * blockDim.x + threadIdx.x;
 
-                             int weightPos;
+                                if (i < d) {
+                                    int weightPos;
+    
+                                    int startGroupIndex;
+                                    int endGroupIndex;
+    
+                                    float min;
+                                    float max;
+                                    float range;
+                                    int groupBase;
+                                    int groupPayloadBase;
+                                    int jj;
+    
+                                    int index = 0;
+                                    float val;
+    
+                                    int startFloatIndex;
 
-                             int startGroupIndex;
-                             int endGroupIndex;
+                                    weightPos = weightIndex + i * n;
+                                    val = 0.0f;
 
-                             float min;
-                             float max;
-                             float range;
-                             int groupBase;
-                             int groupPayloadBase;
-                             int jj;
+                                    startGroupIndex = weightPos / groupSize; // round down
+                                    endGroupIndex = (weightPos + n - 1) / groupSize;
 
-                             int index;
-                             float val;
+                                    for (int group = startGroupIndex; group <= endGroupIndex; group++) {
+                                        groupBase = group * bytesPerGroup;
+                                        groupPayloadBase = groupBase + 8;
+                                        
+                                        min = __int_as_float((encoded[groupBase + 3] & 0xFF)
+                                                    | ((encoded[groupBase + 2] & 0xFF) << 8)
+                                                    | ((encoded[groupBase + 1] & 0xFF) << 16)
+                                                    | ((encoded[groupBase] & 0xFF) << 24));
 
-                             int startFloatIndex;
+                                        max = __int_as_float((encoded[groupBase + 7] & 0xFF)
+                                                    | ((encoded[groupBase + 6] & 0xFF) << 8)
+                                                    | ((encoded[groupBase + 5] & 0xFF) << 16)
+                                                    | ((encoded[groupBase + 4] & 0xFF) << 24));
 
-                             weightPos = weightIndex + i * n;
-                             index = 0;
-                             val = 0.0f;
+                                        range = max - min;
 
-                             startGroupIndex = weightPos / groupSize; // round down
-                             endGroupIndex = (weightPos + n - 1) / groupSize;
+                                        startFloatIndex = group * groupSize;
+                                        for (int j = 0; j < groupSize; j++) {
+                                            jj = startFloatIndex + j;
+                                            if (jj >= weightPos + n) {
+                                                break;
+                                            }
+                                            if (jj >= weightPos) {
+                                                float byteValue = static_cast<float>(encoded[groupPayloadBase + j]);
+                                                float value = (byteValue * range / 255.0f) + min;
 
-                             for (int group = startGroupIndex; group <= endGroupIndex; group++) {
-                                 groupBase = group * bytesPerGroup;
-                                 groupPayloadBase = groupBase + 8;
-                                 min = *((float*)(&encoded[groupBase]));
-                                 max = *((float*)(&encoded[groupBase + 4]));
-                                 range = max - min;
-
-                                 startFloatIndex = group * groupSize;
-                                 for (int j = 0; j < groupSize; j++) {
-                                     jj = startFloatIndex + j;
-                                     if (jj >= weightPos && jj < weightPos + n) {
-                                         int byteValue = encoded[groupPayloadBase + j];
-                                         float value = byteValue / 255.0f * range + min;
-                                         val += value * x[index++];
-                                     }
-                                 }
-                             }
-                             xout[i] = val;
-                         }
-                     """;
-        return loadFromCode(code, "matMul");
+                                                val += value * x[index++];
+                                            }
+                                        }
+                                    }
+                                    xout[i] = val;
+                                }
+                            }
+                        """;
+        return loadFromCode(code, "matMulI8");
     }
 
+//    private CUfunction createI8() {
+//        String code =
+//                """
+//                        extern "C"
+//                        __global__ void matMulI8(float* xout, float* x, float* encoded, int weightIndex,
+//                                                int groupSize, int bytesPerGroup, int n, int d ) {
+//
+//                             int i = blockIdx.x * blockDim.x + threadIdx.x;
+//
+//                             int weightPos;
+//
+//                             int startGroupIndex;
+//                             int endGroupIndex;
+//
+//                             float min;
+//                             float max;
+//                             float range;
+//                             int groupBase;
+//                             int groupPayloadBase;
+//                             int jj;
+//
+//                             int index;
+//                             float val;
+//
+//                             int startFloatIndex;
+//
+//                             if (i < d) {
+//                                 weightPos = weightIndex + i * n;
+//                                 index = 0;
+//                                 val = 0.0f;
+//
+//                                 startGroupIndex = weightPos / groupSize; // round down
+//                                 endGroupIndex = (weightPos + n - 1) / groupSize;
+//
+//                                 for (int group = startGroupIndex; group <= endGroupIndex; group++) {
+//                                     groupBase = group * bytesPerGroup;
+//                                     groupPayloadBase = groupBase + 8;
+//                                     min = *((float*)(&encoded[groupBase]));
+//                                     max = *((float*)(&encoded[groupBase + 4]));
+//                                     range = max - min;
+//
+//                                     startFloatIndex = group * groupSize;
+//                                     for (int j = 0; j < groupSize; j++) {
+//                                         jj = startFloatIndex + j;
+//                                         if (jj >= weightPos && jj < weightPos + n) {
+//                                             int byteValue = encoded[groupPayloadBase + j];
+//                                             float value = byteValue / 255.0f * range + min;
+//                                             val += value * x[index++];
+//                                         }
+//                                     }
+//                                 }
+//                                 xout[i] = val;
+//                             }
+//                         }
+//                     """;
+//        return loadFromCode(code, "matMulI8");
+//    }
+//
     private CUfunction createFP32() {
         String code =
                 """
                             extern "C"
-                            __global__ void matMul(float* xout, float* x, float* w, int n, int d) {
+                            __global__ void matMulFP32(float* xout, float* x, float* w, int n, int d) {
                                 int i = blockIdx.x * blockDim.x + threadIdx.x;
 
                                 if (i < d) {
@@ -362,6 +445,6 @@ public class MatMul extends Kernel {
                                 }
                             }
                         """;
-        return loadFromCode(code, "matMul");
+        return loadFromCode(code, "matMulFP32");
     }
 }
