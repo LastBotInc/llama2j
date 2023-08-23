@@ -23,7 +23,7 @@ See file upstream.txt for details on the commit that this version is synchronize
 
 */
 public class Run {
-    public static final int QUANT_GROUP_SIZE = 32;
+    public static final int QUANT_GROUP_SIZE = 256;
     public static final int QUANT_BITS = 8;
 
     private static final String MODELS_DIRECTORY = "models";
@@ -511,30 +511,19 @@ public class Run {
                 int attentionIndex = h * p.seq_len;
 
                 int keyBase = loff + (h / kv_mul) * head_size -
-                        (int) l_key_cacheCU.floatOffset();
+                              (int) l_key_cacheCU.floatOffset();
 
                 int streamId = 0;
-//                int streamId = h % ContextCUDA.STREAM_COUNT;
-//                if (streamId > maxStream) {
-//                    maxStream = streamId;
-//                }
 
-                cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU,
+                // tmp1CU collect max values per head, and is used in expAndSum below
+                cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU, tmp1CU,
                         attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
-//                cuda.attentionLoop.call(0, qCU, l_key_cacheCU.pointer(), attCU,
-//                        attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
-            }
-//            for (int streamId = 1; streamId <= maxStream; streamId++) {
-//                cuda.synchronizeStream(streamId);
-//            }
 
-            for (h = 0; h < p.n_heads; h++) {
-                int attentionIndex = h * p.seq_len;
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
 
-                // find max value (for numerical stability)
-                cuda.findMax.call(0, tmp1CU, attCU, attentionIndex, pos + 1);
+//                // find max value (for numerical stability) - calculated already in attentionLoop
+//                cuda.findMax.call(0, tmp1CU, attCU, attentionIndex, pos + 1);
 
                 // exp and sum
                 cuda.expAndSum.call(0, tmp2CU, attCU, tmp1CU, tmp3CU, attentionIndex, pos + 1);
