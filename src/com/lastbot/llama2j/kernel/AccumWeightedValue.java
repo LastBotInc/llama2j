@@ -30,6 +30,10 @@ public class AccumWeightedValue extends Kernel {
         float a;
         int t;
         int i;
+
+        for (i = 0; i < head_size; i++) {
+            xb[xbIndex + i] = 0f;
+        }
         for (t = 0; t <= pos; t++) {
             // get the value vector for this head and at this timestep
             // get the attention weight for this timestep
@@ -43,7 +47,7 @@ public class AccumWeightedValue extends Kernel {
     }
 
     public static void callParallel(float[] xb, float[] att, float[] l_value_cache, int pos, int xbIndex,
-                            int valueBase, int head_size, int kv_dim, int attentionIndex) {
+                                    int valueBase, int head_size, int kv_dim, int attentionIndex) {
         CountDownLatch latch = new CountDownLatch(pos);
         // weighted sum of the values, store back into xb
         for (int t = 0; t <= pos; t++) {
