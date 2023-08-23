@@ -12,6 +12,8 @@ import java.util.concurrent.CountDownLatch;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class AccumWeightedValue extends Kernel {
+    public static final int BLOCK_SIZE = 64;
+
     private final ContextCUDA cuda;
     private final CUfunction kernel;
 
@@ -77,7 +79,7 @@ public class AccumWeightedValue extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         call(TEST_STREAM, pXb, pAtt, slidedL_value_cache, pos, xbIndex, valueBase, head_size, kv_dim, attentionIndex);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pXb, xb);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pXb, xb.length, xb);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pXb);
         cuda.free(pAtt);
@@ -109,7 +111,7 @@ public class AccumWeightedValue extends Kernel {
                 Pointer.to(new int[]{attentionIndex})
         );
 
-        int blockSizeX = Math.min(findNextPowerOf2(head_size), MAX_THREADS_PER_BLOCK);
+        int blockSizeX = Math.min(findNextPowerOf2(head_size), BLOCK_SIZE);
         int gridSizeX = (int) Math.ceil((double) head_size / blockSizeX);
 
         isError(cuLaunchKernel(kernel,

@@ -6,6 +6,8 @@ import jcuda.Pointer;
 import java.util.Arrays;
 
 public class MemZeroFloat extends Kernel {
+    public static final int BLOCK_SIZE = 64;
+
     private final ContextCUDA cuda;
 
     public MemZeroFloat(ContextCUDA cuda) {
@@ -25,7 +27,7 @@ public class MemZeroFloat extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         call(TEST_STREAM, pa, index, size);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pa, a);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pa, a.length, a);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pa);
 

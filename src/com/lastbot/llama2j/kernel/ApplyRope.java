@@ -9,6 +9,8 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class ApplyRope extends Kernel {
+    public static final int BLOCK_SIZE = 64;
+
     private final ContextCUDA cuda;
     private final CUfunction kernel;
 
@@ -54,8 +56,8 @@ public class ApplyRope extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         call(TEST_STREAM, pq, pk, pFreq_cis_real, pFreq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pk, k);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pq, q);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pk, k.length, k);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pq, q.length, q);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pq);
         cuda.free(pk);
@@ -87,7 +89,7 @@ public class ApplyRope extends Kernel {
         // choose larger dimension
         int maxDim = Math.max(dim, kv_dim);
 
-        int blockSizeX = Math.min(findNextPowerOf2(maxDim), MAX_THREADS_PER_BLOCK);
+        int blockSizeX = Math.min(findNextPowerOf2(maxDim), BLOCK_SIZE);
 
         int gridSizeX = (int) Math.ceil((double) maxDim / blockSizeX);
 

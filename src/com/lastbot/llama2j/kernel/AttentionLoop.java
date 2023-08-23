@@ -11,6 +11,8 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class AttentionLoop extends Kernel {
+    public static final int BLOCK_SIZE = 64;
+
     private final CUfunction kernel;
 
     public AttentionLoop(ContextCUDA cuda) {
@@ -45,7 +47,7 @@ public class AttentionLoop extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         call(TEST_STREAM, pq, pL_key_cache, pAtt, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pAtt, att);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pAtt, att.length, att);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pq);
         cuda.free(pL_key_cache);

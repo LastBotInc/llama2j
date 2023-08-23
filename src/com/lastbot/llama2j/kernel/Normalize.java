@@ -9,6 +9,8 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class Normalize extends Kernel {
+    public static final int BLOCK_SIZE = 64;
+
     private final ContextCUDA cuda;
     private final CUfunction kernel;
 
@@ -32,7 +34,7 @@ public class Normalize extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         call(TEST_STREAM, px, pDivider, index, size);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, px, x);
+        cuda.copyFromDeviceToHost(TEST_STREAM, px, x.length, x);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(px);
         cuda.free(pDivider);
@@ -51,7 +53,7 @@ public class Normalize extends Kernel {
                 Pointer.to(new int[]{size})
         );
 
-        int blockSizeX = MAX_THREADS_PER_BLOCK;
+        int blockSizeX = BLOCK_SIZE;
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
         isError(cuLaunchKernel(kernel,

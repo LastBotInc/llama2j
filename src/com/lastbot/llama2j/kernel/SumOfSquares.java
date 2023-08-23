@@ -10,8 +10,10 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class SumOfSquares extends Kernel {
-    private static final int SMALL_KERNEL = MAX_THREADS_PER_BLOCK;
-    private static final int LARGE_KERNEL = 1024 * MAX_THREADS_PER_BLOCK;
+    public static final int BLOCK_SIZE = 64;
+
+    private static final int SMALL_KERNEL = BLOCK_SIZE;
+    private static final int LARGE_KERNEL = 1024 * BLOCK_SIZE;
 
     private final CUfunction smallKernel;
     private final CUfunction largeLocalSumKernel;
@@ -44,8 +46,8 @@ public class SumOfSquares extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         call(TEST_STREAM, pSum, px, size);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pSum, sum);
-        cuda.copyFromDeviceToHost(TEST_STREAM, px, x);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pSum, sum.length, sum);
+        cuda.copyFromDeviceToHost(TEST_STREAM, px, x.length, x);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pSum);
         cuda.free(px);
@@ -60,7 +62,7 @@ public class SumOfSquares extends Kernel {
     public void call(int streamId, Pointer sum, Pointer x, int size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
         if (size <= SMALL_KERNEL) {
-            int blockSizeX = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
+            int blockSizeX = Math.min(findNextPowerOf2(size), BLOCK_SIZE);
             int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
             int sharedMemory = blockSizeX * Float.BYTES;
 
