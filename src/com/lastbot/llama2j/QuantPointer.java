@@ -13,6 +13,10 @@ public class QuantPointer {
         this.quant = quant;
     }
 
+    public long getFloatOffset() {
+        return floatOffset;
+    }
+
     public Pointer pointerOfFloatIndex(int floatIndex) {
         int adjustedFloatIndex =  (int) (floatIndex - floatOffset);
         if (adjustedFloatIndex < 0) {
