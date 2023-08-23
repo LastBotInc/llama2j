@@ -39,8 +39,12 @@ public class AccumWeightedValue extends Kernel {
             // get the attention weight for this timestep
             a = att[attentionIndex + t];
             // accumulate the weighted value into xb
-            for (i = 0; i < head_size; i++) {
+            // unroll by 4
+            for (i = 0; i < head_size; i += 4) {
                 xb[xbIndex + i] += a * l_value_cache[vIndex + i];
+                xb[xbIndex + i + 1] += a * l_value_cache[vIndex + i + 1];
+                xb[xbIndex + i + 2] += a * l_value_cache[vIndex + i + 2];
+                xb[xbIndex + i + 3] += a * l_value_cache[vIndex + i + 3];
             }
             vIndex += kv_dim;
         }
