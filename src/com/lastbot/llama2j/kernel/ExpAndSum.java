@@ -39,13 +39,17 @@ public class ExpAndSum extends Kernel {
     }
 
     public void test(float[] sum, float[] x, float[] maxValue, int index, int size) {
+        int threadsPerBlock = Math.min(findNextPowerOf2(size), BLOCK_SIZE);
+        int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
+
         float[] copyOfSum = Arrays.copyOf(sum, sum.length);
         float[] copyOfx = Arrays.copyOf(x, x.length);
         Pointer pSum = cuda.allocateAndCopyToDevice(TEST_STREAM, sum, false);
         Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
         Pointer pMaxValue = cuda.allocateAndCopyToDevice(TEST_STREAM, maxValue, false);
+        Pointer tmp = cuda.allocate((long) blocksPerGrid * Float.BYTES);
         cuda.synchronizeStream(TEST_STREAM);
-        call(TEST_STREAM, pSum, px, pMaxValue, index, size);
+        call(TEST_STREAM, pSum, px, pMaxValue, tmp, index, size);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.copyFromDeviceToHost(TEST_STREAM, pSum, sum.length, sum);
         cuda.copyFromDeviceToHost(TEST_STREAM, px, x.length, x);
@@ -53,6 +57,7 @@ public class ExpAndSum extends Kernel {
         cuda.free(pSum);
         cuda.free(px);
         cuda.free(pMaxValue);
+        cuda.free(tmp);
 
         call(copyOfSum, copyOfx, maxValue, index, size);
 
@@ -64,7 +69,7 @@ public class ExpAndSum extends Kernel {
                 x, copyOfx, 1e-5f);
     }
 
-    public void call(int streamId, Pointer sum, Pointer x, Pointer maxValue, int index, int size) {
+    public void call(int streamId, Pointer sum, Pointer x, Pointer maxValue, Pointer tmp, int index, int size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
         if (size <= SMALL_KERNEL) {
             int blockSizeX = findNextPowerOf2(size);
@@ -92,7 +97,6 @@ public class ExpAndSum extends Kernel {
         } else if (size <= LARGE_KERNEL) {
             int threadsPerBlock = Math.min(findNextPowerOf2(size), BLOCK_SIZE);
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
-            Pointer blockSum = cuda.allocate((long) blocksPerGrid * Float.BYTES);
             // exp and sum
             {
                 int sharedMemory = threadsPerBlock * Float.BYTES;
@@ -101,7 +105,7 @@ public class ExpAndSum extends Kernel {
 
 //            __global__ void expAndSum(float* blockSum, float* x, float* maxValue, int index, int size) {
                 Pointer kernelParameters = Pointer.to(
-                        Pointer.to(blockSum),
+                        Pointer.to(tmp),
                         Pointer.to(x),
                         Pointer.to(maxValue),
                         Pointer.to(new int[]{index}),
@@ -126,7 +130,7 @@ public class ExpAndSum extends Kernel {
 //                __global__ void sumReduction(float* sum, float* blockSum, int blocksPerGrid) {
                 Pointer kernelParameters = Pointer.to(
                         Pointer.to(sum),
-                        Pointer.to(blockSum),
+                        Pointer.to(tmp),
                         Pointer.to(new int[]{blocksPerGrid})
                 );
                 isError(cuLaunchKernel(largeReductionKernel,
@@ -139,7 +143,6 @@ public class ExpAndSum extends Kernel {
                     cuda.synchronizeStream(streamId);
                 }
             }
-            cuda.free(blockSum);
         } else {
             throw new RuntimeException("ExpAndSum.call with too large size" + size);
         }
