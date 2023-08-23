@@ -123,18 +123,6 @@ public class Run {
                     AttentionLoop.call(s.q, s.l_key_cache, s.att, null, attentionIndex, keyBase,
                             kv_dim, queryIndex, pos, head_size);
 
-////                float*att = s -> att + h * p.seq_len;
-//                    // iterate over all timesteps, including the current one
-//                    for (int t = 0; t <= pos; t++) {
-//                        // get the key vector for this head and at this timestep
-////                    float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-//                        int keyIndex = loff + t * kv_dim + (finalH / kv_mul) * head_size;
-//
-//                        MemZeroFloat.call(s.tmp2, 0, 1);
-//                        Attention.call(s.tmp2, s.q, s.l_key_cache, queryIndex, keyIndex, head_size);
-//                        // save the score to the attention buffer
-//                        s.att[attentionIndex + t] = s.tmp2[0];
-//                    }
                     latch.countDown();
                 });
             }
