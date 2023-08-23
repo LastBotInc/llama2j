@@ -214,8 +214,8 @@ public class ContextCUDA implements Closeable {
         cudaMemsetAsync(aWithOffset, 0, (long) size * Sizeof.FLOAT, streams[streamId]);
     }
 
-    public void copyFromHostToDevice(int streamId, float[] sourceHostArray, Pointer targetDeviceArray) {
-        long byteSize = (long) sourceHostArray.length * Sizeof.FLOAT;
+    public void copyFromHostToDevice(int streamId, float[] sourceHostArray, int floatSize, Pointer targetDeviceArray) {
+        long byteSize = (long) floatSize * Sizeof.FLOAT;
 
         setDevice();
 
@@ -224,8 +224,8 @@ public class ContextCUDA implements Closeable {
                 byteSize, cudaMemcpyHostToDevice, streams[streamId]));
     }
 
-    public void copyFromDeviceToHost(int streamId, Pointer sourceDeviceArray, float[] targetHostArray) {
-        long byteSize = (long) targetHostArray.length * Sizeof.FLOAT;
+    public void copyFromDeviceToHost(int streamId, Pointer sourceDeviceArray, int floatSize, float[] targetHostArray) {
+        long byteSize = (long) floatSize * Sizeof.FLOAT;
 
         setDevice();
 
@@ -254,13 +254,17 @@ public class ContextCUDA implements Closeable {
                 cudaMemcpyDeviceToDevice, streams[streamId]));
     }
 
-    public void copyFromDeviceToAnotherDevice(int sourceStreamId, Pointer sourceDeviceArray, Pointer targetDeviceArray,
-                                              ContextCUDA targetContext, int targetStreamId, float[] hostArray) {
+    public void copyFromDeviceToAnotherDevice(int sourceStreamId, Pointer sourceDeviceArray,
+                                              Pointer targetDeviceArray, ContextCUDA targetContext,
+                                              int targetStreamId, int floatSize, float[] hostArray) {
+        if (floatSize > hostArray.length) {
+            throw new RuntimeException("floatSize > hostArray.length");
+        }
         setDevice();
 
-        copyFromDeviceToHost(sourceStreamId, sourceDeviceArray, hostArray);
+        copyFromDeviceToHost(sourceStreamId, sourceDeviceArray, floatSize, hostArray);
         synchronizeStream(sourceStreamId);
-        targetContext.copyFromHostToDevice(targetStreamId, hostArray, targetDeviceArray);
+        targetContext.copyFromHostToDevice(targetStreamId, hostArray, floatSize, targetDeviceArray);
     }
 
     public void synchronizeDevice() {
@@ -306,7 +310,7 @@ public class ContextCUDA implements Closeable {
             t1 = System.currentTimeMillis();
             Pointer d1Pointer = context0.allocateFloatArray(TEST_SIZE, true);
             t1b = System.currentTimeMillis();
-            context0.copyFromHostToDevice(0, d1, d1Pointer);
+            context0.copyFromHostToDevice(0, d1, d1.length, d1Pointer);
 
             t2 = System.currentTimeMillis();
             Pointer d2Pointer = context1.allocateFloatArray(TEST_SIZE, true);
@@ -317,11 +321,11 @@ public class ContextCUDA implements Closeable {
                     context0.synchronizeStream(0);
                     t4 = System.currentTimeMillis();
                     context0.copyFromDeviceToAnotherDevice(0, d1Pointer, d2Pointer,
-                            context1, 1, temp);
+                            context1, 1, d1.length, temp);
                     t5 = System.currentTimeMillis();
                     context1.synchronizeStream(1);
                     t6 = System.currentTimeMillis();
-                    context1.copyFromDeviceToHost(1, d2Pointer, d2);
+                    context1.copyFromDeviceToHost(1, d2Pointer, d2.length, d2);
                     t7 = System.currentTimeMillis();
                     int errorCount = 0;
                     for (int i = 0; i < TEST_SIZE; i++) {
