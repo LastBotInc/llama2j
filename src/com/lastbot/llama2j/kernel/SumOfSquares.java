@@ -10,20 +10,13 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class SumOfSquares extends Kernel {
-    public static final int BLOCK_SIZE = 64;
-
-    private static final int SMALL_KERNEL = BLOCK_SIZE;
-    private static final int LARGE_KERNEL = 1024 * BLOCK_SIZE;
+    public static final int BLOCK_SIZE = 256;
 
     private final CUfunction smallKernel;
-    private final CUfunction largeLocalSumKernel;
-    private final CUfunction largeReductionKernel;
 
     public SumOfSquares(ContextCUDA cuda) {
         super(cuda, "sumOfSquares");
         smallKernel = createSmall();
-        largeLocalSumKernel = createLargeLocalSum();
-        largeReductionKernel = createLargeReduction();
     }
 
     public static void call(float[] sum, float[] x, int size) {
@@ -54,83 +47,28 @@ public class SumOfSquares extends Kernel {
 
         call(copyOfSum, copyOfx, size);
 
-        compareWithThreshold("SumOfSquares.call (" + (size <= SMALL_KERNEL ? "small" : "large") +
-                        ") sum ",
+        compareWithThreshold("SumOfSquares.call size " + size + " sum ",
                 sum, copyOfSum, 1e-2f);
     }
 
     public void call(int streamId, Pointer sum, Pointer x, int size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
-        if (size <= SMALL_KERNEL) {
-            int blockSizeX = Math.min(findNextPowerOf2(size), BLOCK_SIZE);
-            int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
-            int sharedMemory = blockSizeX * Float.BYTES;
+        int sharedMemory = BLOCK_SIZE * Float.BYTES;
+        // __global__ void expAndSumSmall(float* x, float* maxValue, int index, int size) {
+        Pointer kernelParameters = Pointer.to(
+                Pointer.to(sum),
+                Pointer.to(x),
+                Pointer.to(new int[]{size})
+        );
 
-//            __global__ void sumOfSquares(float* sum, float* x, int size) {
-            Pointer kernelParameters = Pointer.to(
-                    Pointer.to(sum),
-                    Pointer.to(x),
-                    Pointer.to(new int[]{size})
-            );
-
-            isError(cuLaunchKernel(smallKernel,
-                    gridSizeX, 1, 1,          // Grid dimension
-                    blockSizeX, 1, 1,      // Block dimension
-                    sharedMemory, stream,  // Shared memory size and stream
-                    kernelParameters, null // Kernel- and extra parameters
-            ));
-            if (SYNC_KERNEL_CALLS) {
-                cuda.synchronizeStream(streamId);
-            }
-        } else if (size <= LARGE_KERNEL) {
-            int threadsPerBlock = 1024;
-            int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
-            // exp and sum
-            {
-                int sharedMemory = threadsPerBlock * Float.BYTES;
-                int blockSizeX = 1024;
-                int gridSizeX = blocksPerGrid;
-
-//                __global__ void localSumOfSquares(float* blockSum, float* x, int size) {
-                Pointer kernelParameters = Pointer.to(
-                        Pointer.to(sum),
-                        Pointer.to(x),
-                        Pointer.to(new int[]{size})
-                );
-                isError(cuLaunchKernel(largeLocalSumKernel,
-                        gridSizeX, 1, 1,          // Grid dimension
-                        blockSizeX, 1, 1,      // Block dimension
-                        sharedMemory, stream,  // Shared memory size and stream
-                        kernelParameters, null // Kernel- and extra parameters
-                ));
-                if (SYNC_KERNEL_CALLS) {
-                    cuda.synchronizeStream(streamId);
-                }
-            }
-            // reduction
-            {
-                int blockSizeX = findNextPowerOf2(blocksPerGrid);
-                int gridSizeX = 1;
-                int sharedMemory = blockSizeX * Float.BYTES;
-
-//                __global__ void sumReduction(float* sum, int blocksPerGrid) {
-                Pointer kernelParameters = Pointer.to(
-                        Pointer.to(sum),
-                        Pointer.to(new int[]{blocksPerGrid}),
-                        Pointer.to(new int[]{size})
-                );
-                isError(cuLaunchKernel(largeReductionKernel,
-                        gridSizeX, 1, 1,          // Grid dimension
-                        blockSizeX, 1, 1,      // Block dimension
-                        sharedMemory, stream,  // Shared memory size and stream
-                        kernelParameters, null // Kernel- and extra parameters
-                ));
-                if (SYNC_KERNEL_CALLS) {
-                    cuda.synchronizeStream(streamId);
-                }
-            }
-        } else {
-            throw new RuntimeException("ExpAndSum.call with too large size" + size);
+        isError(cuLaunchKernel(smallKernel,
+                1, 1, 1,          // Grid dimension
+                BLOCK_SIZE, 1, 1,      // Block dimension
+                sharedMemory, stream,  // Shared memory size and stream
+                kernelParameters, null // Kernel- and extra parameters
+        ));
+        if (SYNC_KERNEL_CALLS) {
+            cuda.synchronizeStream(streamId);
         }
     }
 
@@ -139,105 +77,43 @@ public class SumOfSquares extends Kernel {
                 """
                     extern "C"
                     __global__ void sumOfSquares(float* sum, float* x, int size) {
-                        int tid = blockIdx.x * blockDim.x + threadIdx.x;
+                            extern __shared__ float sdata[];
 
-                        extern __shared__ float sdata[];
+                            int itemsPerThread = size / blockDim.x + 1;
+                            int start = threadIdx.x * itemsPerThread;
+                            int end = start + itemsPerThread;
 
-                        if (tid < size) {
-                            sdata[threadIdx.x] = x[tid] * x[tid];
-                        } else {
-                            sdata[threadIdx.x] = 0.0f;
-                        }
-                        __syncthreads();  // Ensure all threads in block have stored their values
-
-                        // Block-wise reduction
-                        for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                            if (threadIdx.x < stride && (threadIdx.x + stride) < blockDim.x) {
-                                sdata[tid] += sdata[tid + stride];
+                            float value;
+                            float localSum = 0.0f;
+                            for (int i = start; i < end; i++) {
+                                if (i < size) {
+                                    value = x[i] * x[i];
+                                    localSum += value;
+                                }
                             }
-                            __syncthreads();  // Ensure all threads in block are in sync after each step
-                        }
+                            
+                            // Store the localSum in shared memory for reduction
+                            sdata[threadIdx.x] = localSum;
 
-                        // Only thread 0 in the block writes the block result to global memory
-                        if (tid == 0) {
-                            double result = sdata[0] / size + 1e-5f;
-                            sum[0] = 1.0f / sqrtf(result);
-                        }
+                            __syncthreads();  // Ensure all threads in block have stored their values
+
+                            // Block-wise reduction
+                            for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+                                if (threadIdx.x < stride && (threadIdx.x + stride) < blockDim.x) {
+                                    sdata[threadIdx.x] += sdata[threadIdx.x + stride];
+                                }
+                                __syncthreads();  // Ensure all threads in block are in sync after each step
+                            }
+
+                            if (threadIdx.x == 0) {
+                                float ss = sdata[0];
+                                ss /= size;
+                                ss += 1e-5f;
+                                ss = sqrtf(ss);
+                                sum[0] = ss;
+                            }
                     }
                 """;
         return loadFromCode(code, "sumOfSquares");
-    }
-
-    private CUfunction createLargeLocalSum() {
-        String code =
-                """
-                            extern "C"
-                            // First kernel: Calculate the exponential values and perform block-wise reduction.
-                            __global__ void localSumOfSquares(float* sum, float* x, int size) {
-                                int tid = blockIdx.x * blockDim.x + threadIdx.x;
-                                    
-                                // Shared memory for block-wise summation
-                                extern __shared__ float sdata[];
-                                    
-                                // Ensure the thread is within bounds
-                                if (tid < size) {
-                                    sdata[threadIdx.x] = x[tid] * x[tid];
-                                } else {
-                                    sdata[threadIdx.x] = 0.0f;
-                                }
-                                __syncthreads();  // Ensure all threads in block have stored their values
-                                    
-                                __syncthreads();
-                                    
-                                // Block-wise reduction
-                                for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                    if (threadIdx.x < stride && (threadIdx.x + stride) < blockDim.x) {
-                                        sdata[threadIdx.x] += sdata[threadIdx.x + stride];
-                                    }
-                                    __syncthreads();
-                                }
-                                    
-                                // First thread of each block writes its result to the global array
-                                if (threadIdx.x == 0) {
-                                    sum[blockIdx.x] = sdata[0];
-                                }
-                            }
-                        """;
-        return loadFromCode(code, "localSumOfSquares");
-    }
-
-    private CUfunction createLargeReduction() {
-        String code =
-                """
-                            extern "C"
-                            // Second kernel: Sums up the partial sums
-                            __global__ void sumReduction(float* sum, int blocksPerGrid, int size) {
-                                extern __shared__ float sdata[];
-                            
-                                int tid = threadIdx.x;
-                                if (tid < blocksPerGrid) {
-                                    sdata[tid] = sum[tid];
-                                } else {
-                                    sdata[tid] = 0.0f;
-                                }
-                                    
-                                __syncthreads();
-                                    
-                                // Block-wise reduction
-                                for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                    if (tid < stride && (threadIdx.x + stride) < blockDim.x) {
-                                        sdata[tid] += sdata[tid + stride];
-                                    }
-                                    __syncthreads();
-                                }
-                                    
-                                // First thread writes the final result
-                                if (tid == 0) {
-                                    double result = sdata[0] / size + 1e-5f;
-                                    sum[0] = 1.0f / sqrtf(result);
-                                }
-                            }
-                        """;
-        return loadFromCode(code, "sumReduction");
     }
 }
