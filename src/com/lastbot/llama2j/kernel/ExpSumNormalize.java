@@ -10,7 +10,7 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class ExpSumNormalize extends Kernel {
-    public static final int BLOCK_SIZE = 16;
+    public static final int BLOCK_SIZE = 256;
 
     private final CUfunction smallKernel;
 
@@ -85,9 +85,6 @@ public class ExpSumNormalize extends Kernel {
                             int start = threadIdx.x * itemsPerThread;
                             int end = start + itemsPerThread;
 
-                            //printf("S-E: size %d  threadIdx.x %d  itemsPerThread %d  start %d  end %d\\n",
-                            //size, threadIdx.x, itemsPerThread, start, end);
-
                             float max_val = maxValue[0];
 
                             float value;
@@ -95,34 +92,17 @@ public class ExpSumNormalize extends Kernel {
                             for (int i = start; i < end; i++) {
                                 if (i < size) {
                                     value = expf(x[index + i] - max_val);
-                                    if (!isfinite(value)) {
-                                        printf("!VALUE: threadIdx.x %d i %d  value %.5f  x[index + i] %.5f  max_val %.5f\\n",
-                                        threadIdx.x, i, value, x[index + i], max_val);
-                                    }
-                                    assert(isfinite(value));
 
                                     x[index + i] = value;
                                     localSum += value;
-                                    // printf("CALC: threadIdx.x %d i %d  value %.5f  localSum %.5f\\n",
-                                    // threadIdx.x, i, value, localSum);
                                 }
                             }
+                            __syncthreads();
                             
-                            __syncthreads();  // Ensure all threads in block have stored their values
-
                             // Store the localSum in shared memory for reduction
                             sdata[threadIdx.x] = localSum;
 
                             __syncthreads();  // Ensure all threads in block have stored their values
-
-                            // debug
-                            if (threadIdx.x == 0) {
-                                float sum0 = 0.0f;
-                                for (int i = 0; i < blockDim.x; i++) {
-                                    sum0 += sdata[i];
-                                }
-                                //printf("sum0  %.5f\\n", sum0);
-                            }
 
                             // Block-wise reduction
                             for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
@@ -133,26 +113,14 @@ public class ExpSumNormalize extends Kernel {
                             }
 
                             __syncthreads();
-
+                            
                             float finalSum = sdata[0];
-
-                            // debug
-                            //if (threadIdx.x == 0) {
-                            //    printf("finalSum  %.5f\\n", finalSum);
-                            //    for (int i = 0; i < blockDim.x; i++) {
-                            //        printf("BLK i %d  sdata %.5f\\n", i, sdata[i]);
-                            //    }
-                            //}
 
                             for (int i = start; i < end; i++) {
                                 if (i < size) {
                                     if (finalSum != 0.0f) {
                                         x[index + i] /= finalSum;
                                     }
-                                    assert(isfinite(x[index + i]));
-                                    //printf("NORM: i %d  result %.5f  size %d  threadIdx.x %d  start %d  end %d\\n",
-                                    //                i, x[index + i], size, threadIdx.x, start, end);
-                                    // assert(isfinite(x[index + i]));
                                 }
                             }
                         }
