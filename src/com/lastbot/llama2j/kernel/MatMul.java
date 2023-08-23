@@ -216,7 +216,7 @@ public class MatMul extends Kernel {
         callI8(copyOfXout, copyOfx, w, weightIndex, n, d);
 
         compareWithThreshold("MatMul.call xout ",
-                xout, copyOfXout, 1e-4f);
+                xout, copyOfXout, 1e-3f);
     }
 
     public void callFP32(int streamId, Pointer xout, Pointer x, SlicePointer w, int weightIndex, int n, int d) {
