@@ -11,8 +11,8 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class FindMax extends Kernel {
-    public static final int BLOCK_SIZE = 256;
-    private static final int SIMPLE_KERNEL_THRESHOLD = 8;
+    public static final int BLOCK_SIZE = 64;
+    private static final int SIMPLE_KERNEL_THRESHOLD = 32;
 
     private final ContextCUDA cuda;
 
@@ -89,7 +89,7 @@ public class FindMax extends Kernel {
             isError(cuLaunchKernel(findMaxKernel,
                     (size + BLOCK_SIZE - 1) / BLOCK_SIZE, 1, 1,          // Grid dimension
                     BLOCK_SIZE, 1, 1,      // Block dimension
-                    BLOCK_SIZE * Sizeof.FLOAT, stream,  // Shared memory size and stream
+                    (BLOCK_SIZE * Sizeof.FLOAT) + 1, stream,  // Shared memory size and stream
                     kernelParameters, null // Kernel- and extra parameters
             ));
             if (SYNC_KERNEL_CALLS) {
