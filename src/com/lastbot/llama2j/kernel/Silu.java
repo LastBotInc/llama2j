@@ -9,6 +9,8 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class Silu extends Kernel {
+    public static final int BLOCK_SIZE = 64;
+
     private final ContextCUDA cuda;
     private final CUfunction kernel;
 
@@ -31,7 +33,7 @@ public class Silu extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         call(TEST_STREAM, pHb, pHb2, hidden_dim);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pHb, hb);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pHb, hb.length, hb);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pHb);
         cuda.free(pHb2);
@@ -48,7 +50,7 @@ public class Silu extends Kernel {
                 Pointer.to(new int[]{hidden_dim})
         );
 
-        int blockSizeX = Math.min(findNextPowerOf2(hidden_dim), MAX_THREADS_PER_BLOCK);
+        int blockSizeX = Math.min(findNextPowerOf2(hidden_dim), BLOCK_SIZE);
         int gridSizeX = (int) Math.ceil((double) hidden_dim / blockSizeX);
 
         isError(cuLaunchKernel(kernel,
