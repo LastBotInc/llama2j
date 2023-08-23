@@ -71,14 +71,6 @@ public abstract class Kernel {
         defaultFunction = loadFromFile(fileName, functionName);
     }
 
-    protected CUfunction getFunction(KernelSize kernelSize) {
-        return functionByKernelSizeMap.get(kernelSize);
-    }
-
-    protected void setFunction(KernelSize kernelSize, CUfunction function) {
-        functionByKernelSizeMap.put(kernelSize, function);
-    }
-
     protected CUfunction loadFromCode(String code, String functionName) {
         String sourceFileName = GENERATED_CUDA_SOURCE_PREFIX + name + "_" + functionName + CUDA_SOURCE_EXTENSION;
         String sourceFilePath = KERNEL_DIRECTORY + File.separator + sourceFileName;
