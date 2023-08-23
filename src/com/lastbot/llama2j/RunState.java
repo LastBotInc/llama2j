@@ -19,6 +19,7 @@ public class RunState implements Closeable {
     float[] logits; // output logits
     float[] tmp1;
     float[] tmp2;
+    float[] tmp3;
 
     // kv cache
     float[] l_key_cache;   // (layer, seq_len, dim)
@@ -38,6 +39,7 @@ public class RunState implements Closeable {
     SlicePointer[] l_value_cacheCU;
     Pointer[] tmp1CU;
     Pointer[] tmp2CU;
+    Pointer[] tmp3CU;
 
     public static long bytesStatic(Config p) {
         int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
@@ -71,12 +73,14 @@ public class RunState implements Closeable {
 
         long t0 = System.currentTimeMillis();
         // we use tmp arrays to copy data from GPU to CPU to be copied to another GPU (p.dim floats), and
-        // to copy logits from GPU to CPU (p.vocab_size floats). We set the size of tmp1 and tmp2 buffers to
-        // accommodate both transfers. In addition, the tmp1CU and tmp2CU are used within transformer for smaller
-        // transfers.
+        // to copy logits from GPU to CPU (p.vocab_size floats). We set the size of tmp1, tmp2, and tmp3 buffers to
+        // accommodate both transfers. In addition, the tmp1CU, tmp2CU, and tmp4CU are used within transformer
+        // as temporary buffers for kernels. Allocating them in RunState ensures avoids conflicts when
+        // we run several RunStates in parallel.
         int tmpSize = Math.max(p.dim, p.vocab_size) * Sizeof.FLOAT;
         tmp1 = c.cpu.allocateFloatArray(tmpSize);
         tmp2 = c.cpu.allocateFloatArray(tmpSize);
+        tmp3 = c.cpu.allocateFloatArray(tmpSize);
 
         if (c.layerAllocation.hasCPULayers()) {
             x = c.cpu.allocateFloatArray(p.dim);
@@ -114,6 +118,7 @@ public class RunState implements Closeable {
             l_value_cacheCU = new SlicePointer[n];
             tmp1CU = new Pointer[n];
             tmp2CU = new Pointer[n];
+            tmp3CU = new Pointer[n];
 
             for (int dev = 0; dev < c.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = c.cudas[dev];
@@ -145,12 +150,13 @@ public class RunState implements Closeable {
 
                 tmp1CU[dev] = cu.allocateFloatArray(tmpSize, true);
                 tmp2CU[dev] = cu.allocateFloatArray(tmpSize, true);
+                tmp3CU[dev] = cu.allocateFloatArray(tmpSize, true);
 
                 if (xCU[dev] == null || xbCU[dev] == null || xb2CU[dev] == null || hbCU[dev] == null ||
                         hb2CU[dev] == null || qCU[dev] == null || kCU[dev] == null || vCU[dev] == null ||
                         attCU[dev] == null || logitsCU[dev] == null ||
                         l_key_cacheCU[dev] == null || l_value_cacheCU[dev] == null ||
-                        tmp1CU[dev] == null || tmp2CU[dev] == null) {
+                        tmp1CU[dev] == null || tmp2CU[dev] == null || tmp3CU[dev] == null) {
                     LLogger.error("Failed to allocate CUDA memory on device " + dev);
                     throw new RuntimeException();
                 }
