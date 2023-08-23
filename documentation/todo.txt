@@ -1,8 +1,1 @@
-Adjust for compresses weights and separate the index into a parameter
-- weightNormalizeAndScale
-- matmul
--
-
-
-Also:
-wclsCU
+Check out half float
