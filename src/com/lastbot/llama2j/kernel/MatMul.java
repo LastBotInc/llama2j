@@ -370,64 +370,6 @@ public class MatMul extends Kernel {
         return loadFromCode(code, "matMulI8");
     }
 
-//    private CUfunction createI8() {
-//        String code =
-//                """
-//                        extern "C"
-//                        __global__ void matMulI8(float* xout, float* x, float* encoded, int weightIndex,
-//                                                int groupSize, int bytesPerGroup, int n, int d ) {
-//
-//                             int i = blockIdx.x * blockDim.x + threadIdx.x;
-//
-//                             int weightPos;
-//
-//                             int startGroupIndex;
-//                             int endGroupIndex;
-//
-//                             float min;
-//                             float max;
-//                             float range;
-//                             int groupBase;
-//                             int groupPayloadBase;
-//                             int jj;
-//
-//                             int index;
-//                             float val;
-//
-//                             int startFloatIndex;
-//
-//                             if (i < d) {
-//                                 weightPos = weightIndex + i * n;
-//                                 index = 0;
-//                                 val = 0.0f;
-//
-//                                 startGroupIndex = weightPos / groupSize; // round down
-//                                 endGroupIndex = (weightPos + n - 1) / groupSize;
-//
-//                                 for (int group = startGroupIndex; group <= endGroupIndex; group++) {
-//                                     groupBase = group * bytesPerGroup;
-//                                     groupPayloadBase = groupBase + 8;
-//                                     min = *((float*)(&encoded[groupBase]));
-//                                     max = *((float*)(&encoded[groupBase + 4]));
-//                                     range = max - min;
-//
-//                                     startFloatIndex = group * groupSize;
-//                                     for (int j = 0; j < groupSize; j++) {
-//                                         jj = startFloatIndex + j;
-//                                         if (jj >= weightPos && jj < weightPos + n) {
-//                                             int byteValue = encoded[groupPayloadBase + j];
-//                                             float value = byteValue / 255.0f * range + min;
-//                                             val += value * x[index++];
-//                                         }
-//                                     }
-//                                 }
-//                                 xout[i] = val;
-//                             }
-//                         }
-//                     """;
-//        return loadFromCode(code, "matMulI8");
-//    }
-//
     private CUfunction createFP32() {
         String code =
                 """
