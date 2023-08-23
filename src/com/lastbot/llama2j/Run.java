@@ -120,7 +120,7 @@ public class Run {
 
                     int keyBase = loff + (finalH / kv_mul) * head_size;
 
-                    AttentionLoop.call(s.q, s.l_key_cache, s.att, attentionIndex, keyBase,
+                    AttentionLoop.call(s.q, s.l_key_cache, s.att, null, attentionIndex, keyBase,
                             kv_dim, queryIndex, pos, head_size);
 
 ////                float*att = s -> att + h * p.seq_len;
@@ -159,10 +159,7 @@ public class Run {
                 // exp and sum
                 // redundant
 //                MemZeroFloat.call(s.tmp2, 0, 1);
-                ExpAndSum.call(s.tmp2, s.att, s.tmp1, attentionIndex, pos + 1);
-
-                // normalize
-                Normalize.call(s.att, s.tmp2, attentionIndex, pos + 1);
+                ExpSumNormalize.call(s.att, s.tmp1, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 // todo zzz consider removing zeroing and integrating that into AccumWeightedValue
@@ -291,24 +288,16 @@ public class Run {
 
                 int keyBase = loff + (h / kv_mul) * head_size;
 
-                cuda.attentionLoop.test(s.q, s.l_key_cache, s.att, attentionIndex, keyBase,
+                cuda.attentionLoop.test(s.q, s.l_key_cache, s.att, s.tmp1, attentionIndex, keyBase,
                         kv_dim, queryIndex, pos, head_size);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
 
-                // find max value (for numerical stability)
-                // redundant
-//                cuda.memZeroFloat.test(s.tmp1, 0, 1);
-                cuda.findMax.test(s.tmp1, s.att, attentionIndex, pos + 1);
-
                 // exp and sum
                 // redundant
 //                cuda.memZeroFloat.test(s.tmp2, 0, 1);
-                cuda.expAndSum.test(s.tmp2, s.att, s.tmp1, attentionIndex, pos + 1);
-
-                // normalize
-                cuda.normalize.test(s.att, s.tmp2, attentionIndex, pos + 1);
+                cuda.expSumNormalize.test(s.att, s.tmp1, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
@@ -522,14 +511,8 @@ public class Run {
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
 
-//                // find max value (for numerical stability) - calculated already in attentionLoop
-//                cuda.findMax.call(0, tmp1CU, attCU, attentionIndex, pos + 1);
-
                 // exp and sum
-                cuda.expAndSum.call(0, tmp2CU, attCU, tmp1CU, tmp3CU, attentionIndex, pos + 1);
-
-                // normalize
-                cuda.normalize.call(0, attCU, tmp2CU, attentionIndex, pos + 1);
+                cuda.expSumNormalize.call(0, attCU, tmp1CU, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
@@ -746,11 +729,7 @@ public class Run {
                         FindMax.call(max, logits, 0, p.vocab_size);
 
                         // exp and sum
-                        float[] sum = {0f};
-                        ExpAndSum.call(sum, logits, max, 0, p.vocab_size);
-
-                        // normalize
-                        Normalize.call(logits, sum, 0, p.vocab_size);
+                        ExpSumNormalize.call(logits, max, 0, p.vocab_size);
 
                         if (commandLine.getTopp() > 0.999) {
                             // we sample from this distribution to get the next token
