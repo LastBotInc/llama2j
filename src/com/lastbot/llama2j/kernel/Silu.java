@@ -14,6 +14,18 @@ public class Silu extends Kernel {
     private final ContextCUDA cuda;
     private final CUfunction kernel;
 
+    // Implements
+
+    //    // SwiGLU non-linearity
+    //        for (int i = 0; i < hidden_dim; i++) {
+    //        float val = s->hb[i];
+    //        // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+    //        val *= (1.0f / (1.0f + expf(-val)));
+    //        // elementwise multiply with w3(x)
+    //        val *= s->hb2[i];
+    //        s->hb[i] = val;
+    //    }
+
     public Silu(ContextCUDA cuda) {
         super(cuda, "silu");
         this.cuda = cuda;
