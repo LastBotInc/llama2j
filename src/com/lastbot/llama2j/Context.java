@@ -9,7 +9,7 @@ public class Context implements Closeable {
     final ContextCPU cpu;
 
     public Context(LayerAllocation layerAllocation) throws IOException {
-        this.cpu = layerAllocation.hasCPULayers() ? new ContextCPU("contextCPU0") : null;
+        this.cpu = new ContextCPU("contextCPU0");
         this.cudas = new ContextCUDA[layerAllocation.deviceCount];
         this.layerAllocation = layerAllocation;
         for (int dev = 0; dev < layerAllocation.deviceCount; dev++) {
