@@ -23,10 +23,10 @@ See file upstream.txt for details on the commit that this version is synchronize
 
 */
 public class Run {
-    private static final String MODELS_DIRECTORY = "models";
-
-    public static final int QUANT_GROUP_SIZE = 32 - 8;
+    public static final int QUANT_GROUP_SIZE = 32;
     public static final int QUANT_BITS = 8;
+
+    private static final String MODELS_DIRECTORY = "models";
 
 // ----------------------------------------------------------------------------
 // The below commented-out functions show how to implement rmsnorm() or softmax()
@@ -430,16 +430,7 @@ public class Run {
 
                 // newCuda.synchronizeStream(0);
 
-                cuda.copyFromDeviceToAnotherDevice(0, xCU, s.xCU[dev], newCuda, 0, s.x);
-//                cuda.copyFromDeviceToAnotherDevice(0, xbCU, s.xbCU[dev], newCuda, 0, s.xb);
-//                cuda.copyFromDeviceToAnotherDevice(0, xb2CU, s.xb2CU[dev], newCuda, 0, s.xb2);
-//                cuda.copyFromDeviceToAnotherDevice(0, hbCU, s.hbCU[dev], newCuda, 0, s.hb);
-//                cuda.copyFromDeviceToAnotherDevice(0, hb2CU, s.hb2CU[dev], newCuda, 0, s.hb2);
-//                cuda.copyFromDeviceToAnotherDevice(0, qCU, s.qCU[dev], newCuda, 0, s.q);
-//                cuda.copyFromDeviceToAnotherDevice(0, kCU, s.kCU[dev], newCuda, 0, s.k);
-//                cuda.copyFromDeviceToAnotherDevice(0, vCU, s.vCU[dev], newCuda, 0, s.v);
-//                cuda.copyFromDeviceToAnotherDevice(0, attCU, s.attCU[dev], newCuda, 0, s.att);
-//                cuda.copyFromDeviceToAnotherDevice(0, logitsCU, s.logitsCU[dev], newCuda, 0, s.logits);
+                cuda.copyFromDeviceToAnotherDevice(0, xCU, s.xCU[dev], newCuda, 0, dim, s.tmp1);
 
                 // roll over to new device state variables
 
@@ -605,7 +596,7 @@ public class Run {
     private static void log(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
         float[] hostArray = new float[size];
         cuda.synchronizeDevice();
-        cuda.copyFromDeviceToHost(0, pointer, hostArray);
+        cuda.copyFromDeviceToHost(0, pointer, hostArray.length, hostArray);
         cuda.synchronizeDevice();
         log(pos, name, hostArray);
     }
@@ -627,7 +618,7 @@ public class Run {
     private static void summarize(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
         float[] hostArray = new float[size];
         cuda.synchronizeDevice();
-        cuda.copyFromDeviceToHost(0, pointer, hostArray);
+        cuda.copyFromDeviceToHost(0, pointer, hostArray.length, hostArray);
         cuda.synchronizeDevice();
         summarize(pos, name, hostArray);
     }
@@ -748,7 +739,7 @@ public class Run {
                 // if in cuda mode, copy logits from CUDA to CPU
                 if (mode == Mode.CUDA) {
                     context.lastCuda().synchronizeStream(0);
-                    context.lastCuda().copyFromDeviceToHost(0, s.logitsCU[lastDev], logits);
+                    context.lastCuda().copyFromDeviceToHost(0, s.logitsCU[lastDev], p.vocab_size, logits);
                     context.lastCuda().synchronizeStream(0);
                 }
 
