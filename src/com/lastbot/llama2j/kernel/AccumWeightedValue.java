@@ -134,6 +134,7 @@ public class AccumWeightedValue extends Kernel {
                                                                 int kv_dim, int attentionIndex)
                             {
                                 int i = blockIdx.x * blockDim.x + threadIdx.x;
+
                                 if (i < head_size) {
                                     float sum = 0.0f;
                                     int vIndex;
@@ -147,7 +148,7 @@ public class AccumWeightedValue extends Kernel {
                                         // accumulate the weighted value into xb
                                         sum += a * l_value_cache[vIndex + i];
                                     }
-                                    xb[xbIndex + i] += sum;
+                                    xb[xbIndex + i] = sum;
                                 }
                             }
                         """;
