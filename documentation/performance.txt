@@ -1,3 +1,109 @@
+------------ CUDA llama2_7b_chat.bin 1 GPU ------------
+achieved tok/s: 4.3
+
+eliminate memZeroFloat()
+achieved tok/s: 4.28
+
+eliminate all memZeroFloat()
+achieved tok/s: 4.30
+
+FindMax:
+BLOCK_SIZE = 256;
+SIMPLE_KERNEL_THRESHOLD = 8
+achieved tok/s: 4.28
+
+BLOCK_SIZE = 256;
+SIMPLE_KERNEL_THRESHOLD = 128;
+achieved tok/s: 4.28
+
+BLOCK_SIZE = 64;
+SIMPLE_KERNEL_THRESHOLD = 128;
+achieved tok/s: 4.28
+
+BLOCK_SIZE = 64;
+SIMPLE_KERNEL_THRESHOLD = 8;
+achieved tok/s: 4.29
+
+BLOCK_SIZE = 32;
+SIMPLE_KERNEL_THRESHOLD = 8;
+achieved tok/s: 4.28
+
+BLOCK_SIZE = 128;
+SIMPLE_KERNEL_THRESHOLD = 8;
+achieved tok/s: 4.28
+
+BLOCK_SIZE = 512;
+SIMPLE_KERNEL_THRESHOLD = 8;
+achieved tok/s: 4.28
+
+BLOCK_SIZE = 64;
+SIMPLE_KERNEL_THRESHOLD = 32;
+achieved tok/s: 4.29
+
+QUANT_GROUP_SIZE = 32;
+achieved tok/s: 4.29
+
+QUANT_GROUP_SIZE = 64;
+achieved tok/s: 4.91
+
+QUANT_GROUP_SIZE = 128;
+achieved tok/s: 5.28
+
+QUANT_GROUP_SIZE = 512;
+achieved tok/s: 5.76
+
+QUANT_GROUP_SIZE = 1024;
+achieved tok/s: 5.79
+
+QUANT_GROUP_SIZE = 256;
+achieved tok/s: 5.43
+
+ExpAndSum
+BLOCK_SIZE = 32;
+achieved tok/s: 5.42
+
+BLOCK_SIZE = 64;
+achieved tok/s: 5.43
+
+BLOCK_SIZE = 128;
+achieved tok/s: 5.45
+
+BLOCK_SIZE = 256;
+achieved tok/s: 5.47
+
+BLOCK_SIZE = 512;
+achieved tok/s: 5.46
+
+BLOCK_SIZE = 1024;
+achieved tok/s: 5.46
+
+->
+BLOCK_SIZE = 128;
+achieved tok/s: 5.45
+
+CPU
+AccumWeightedValue unroll 4
+achieved tok/s: 2.78
+
+AccumWeightedValue unroll 8
+achieved tok/s: 2.70
+
+AccumWeightedValue no unroll
+achieved tok/s: 2.75
+
+run setup.sh
+achieved tok/s: 2.77
+
+baseline
+achieved tok/s: 5.45
+
+attentionLoop to store also max
+achieved tok/s: 5.49
+
+combine normalize to ExpSum
+achieved tok/s: 5.49
+
+
 ---------------- llama2j ----------------
 CUDA llama2_7b.bin 2 GPU
 MAX_THREADS_PER_BLOCK = 32;
@@ -19,9 +125,10 @@ achieved tok/s: 10.3
 MAX_THREADS_PER_BLOCK = 64;
 achieved tok/s: 9.2
 
-
 CPU llama2_7b.bin
 achieved tok/s: 4.7
+
+
 
 
 ---------------- llama2.c ----------------
