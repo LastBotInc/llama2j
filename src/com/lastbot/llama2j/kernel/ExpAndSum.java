@@ -10,7 +10,7 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class ExpAndSum extends Kernel {
-    public static final int BLOCK_SIZE = 64;
+    public static final int BLOCK_SIZE = 128;
 
     private static final int SMALL_KERNEL = BLOCK_SIZE;
     private static final int LARGE_KERNEL = 1024 * 1024;
@@ -240,8 +240,9 @@ public class ExpAndSum extends Kernel {
                                 }
                                     
                                 __syncthreads();
-                                    
+
                                 // Block-wise reduction
+                                #pragma unroll 8
                                 for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
                                     if (tid < stride && (threadIdx.x + stride) < blockDim.x) {
                                         sdata[tid] += sdata[tid + stride];
