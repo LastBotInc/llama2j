@@ -10,7 +10,9 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class ExpAndSum extends Kernel {
-    private static final int SMALL_KERNEL = MAX_THREADS_PER_BLOCK;
+    public static final int BLOCK_SIZE = 64;
+
+    private static final int SMALL_KERNEL = BLOCK_SIZE;
     private static final int LARGE_KERNEL = 1024 * 1024;
 
     private final CUfunction smallKernel;
@@ -45,8 +47,8 @@ public class ExpAndSum extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         call(TEST_STREAM, pSum, px, pMaxValue, index, size);
         cuda.synchronizeStream(TEST_STREAM);
-        cuda.copyFromDeviceToHost(TEST_STREAM, pSum, sum);
-        cuda.copyFromDeviceToHost(TEST_STREAM, px, x);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pSum, sum.length, sum);
+        cuda.copyFromDeviceToHost(TEST_STREAM, px, x.length, x);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pSum);
         cuda.free(px);
@@ -88,7 +90,7 @@ public class ExpAndSum extends Kernel {
                 cuda.synchronizeStream(streamId);
             }
         } else if (size <= LARGE_KERNEL) {
-            int threadsPerBlock = Math.min(findNextPowerOf2(size), MAX_THREADS_PER_BLOCK);
+            int threadsPerBlock = Math.min(findNextPowerOf2(size), BLOCK_SIZE);
             int blocksPerGrid = (int) Math.ceil((double) size / threadsPerBlock);
             Pointer blockSum = cuda.allocate((long) blocksPerGrid * Float.BYTES);
             // exp and sum
@@ -117,7 +119,7 @@ public class ExpAndSum extends Kernel {
             }
             // reduction
             {
-                int blockSizeX = Math.min(findNextPowerOf2(blocksPerGrid), MAX_THREADS_PER_BLOCK);
+                int blockSizeX = Math.min(findNextPowerOf2(blocksPerGrid), BLOCK_SIZE);
                 int gridSizeX = (int) Math.ceil((double) blocksPerGrid / blockSizeX);
                 int sharedMemory = blockSizeX * Float.BYTES;
 
@@ -147,7 +149,7 @@ public class ExpAndSum extends Kernel {
         String code =
                 """
                             extern "C"
-                            __global__ void expAndSum(float* sum, float* x, float* maxValue, int index, int size) {
+                            __global__ void expAndSumSmall(float* sum, float* x, float* maxValue, int index, int size) {
                                 int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
                                 extern __shared__ float sdata[];
@@ -159,7 +161,7 @@ public class ExpAndSum extends Kernel {
                                     
                                     // Store the value in shared memory for reduction
                                     sdata[threadIdx.x] = x[index + tid];
-                                } else {
+                                  } else {
                                     sdata[threadIdx.x] = 0.0f;
                                 }
                                 __syncthreads();  // Ensure all threads in block have stored their values
@@ -177,7 +179,7 @@ public class ExpAndSum extends Kernel {
                                 }
                             }
                         """;
-        return loadFromCode(code, "expAndSum");
+        return loadFromCode(code, "expAndSumSmall");
     }
 
     private CUfunction createLargeLocalSum() {
