@@ -260,7 +260,7 @@ public class MatMul extends Kernel {
         if ((long) weightIndex - w.getFloatOffset() > Integer.MAX_VALUE) {
             throw new RuntimeException("(long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE");
         }
-        int adjustedWeightIndex = (int) (weightIndex - w.getFloatOffset());
+        int adjustedWeightIndex = Math.toIntExact(weightIndex - w.getFloatOffset());
         callI8(streamId, xout, x, encoded, q, adjustedWeightIndex, n, d);
     }
 

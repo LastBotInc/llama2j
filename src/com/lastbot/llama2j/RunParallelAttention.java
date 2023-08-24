@@ -476,8 +476,7 @@ public class RunParallelAttention {
                         // attention scores for this head
                         int attentionIndex = h * p.seq_len;
 
-                        int keyBase = loff + (h / kv_mul) * head_size -
-                                      (int) finalL_key_cacheCU.floatOffset();
+                        int keyBase = loff + (h / kv_mul) * head_size - Math.toIntExact(finalL_key_cacheCU.floatOffset());
 
                         // get the query vector for this head
 //                float*q = s -> q + h * head_size;

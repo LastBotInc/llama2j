@@ -451,8 +451,7 @@ public class Run {
                 // attention scores for this head
                 int attentionIndex = h * p.seq_len;
 
-                int keyBase = loff + (h / kv_mul) * head_size -
-                              (int) l_key_cacheCU.floatOffset();
+                int keyBase = loff + (h / kv_mul) * head_size - Math.toIntExact(l_key_cacheCU.floatOffset());
 
                 int streamId = 0;
                 int maxIndex = h;

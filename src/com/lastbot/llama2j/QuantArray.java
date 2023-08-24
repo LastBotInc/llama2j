@@ -15,12 +15,16 @@ public class QuantArray {
     }
 
     public int byteOffsetByFloatIndex(int floatIndex) {
-        int adjustedFloatIndex = (int) (floatIndex - floatOffset);
+        int adjustedFloatIndex = Math.toIntExact(floatIndex - floatOffset);
         if (adjustedFloatIndex < 0) {
             throw new RuntimeException("adjustedFloatIndex < 0");
         }
         int byteOffset = quant.byteOffsetByFloatIndex(adjustedFloatIndex);
         return byteOffset;
+    }
+
+    public long getFloatOffset() {
+        return floatOffset;
     }
 
     public Quant getQuant() {

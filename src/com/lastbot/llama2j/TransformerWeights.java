@@ -246,8 +246,8 @@ public class TransformerWeights {
                             int firstLayer = c.layerAllocation.firstLayer[dev];
                             int lastLayer = c.layerAllocation.lastLayer[dev];
                             int devLayers = lastLayer - firstLayer + 1;
-                            int devFloatOffset = (int) ((long) floatSize * firstLayer / totalLayers);
-                            int devFloatSize = (int) ((long) floatSize * devLayers / totalLayers);
+                            int devFloatOffset = Math.toIntExact((long) floatSize * firstLayer / totalLayers);
+                            int devFloatSize = Math.toIntExact((long) floatSize * devLayers / totalLayers);
 
                             quantPointers[dev] = cu.allocateQuantAndCopyToDevice(0, quant, byteBuffer,
                                     devFloatOffset, devFloatSize, true);
@@ -260,9 +260,9 @@ public class TransformerWeights {
                         int firstLayer = c.layerAllocation.firstCPULayer;
                         int lastLayer = c.layerAllocation.lastCPULayer;
                         int cpuLayers = lastLayer - firstLayer + 1;
-                        int cpuFloatOffset = (int) ((long) floatSize * firstLayer / totalLayers);
-                        int cpuByteOffset = (int) ((long) totalByteSize * firstLayer / totalLayers);
-                        int cpuByteSize = (int) ((long) totalByteSize * cpuLayers / totalLayers);
+                        int cpuFloatOffset = Math.toIntExact((long) floatSize * firstLayer / totalLayers);
+                        int cpuByteOffset = Math.toIntExact((long) totalByteSize * firstLayer / totalLayers);
+                        int cpuByteSize = Math.toIntExact((long) totalByteSize * cpuLayers / totalLayers);
 
                         byte[] cpuData = new byte[cpuByteSize];
                         byteBuffer.rewind();
@@ -291,9 +291,9 @@ public class TransformerWeights {
                         int lastLayer = c.layerAllocation.lastCPULayer;
                         if (lastLayer == totalLayers - 1) {
                             int cpuLayers = lastLayer - firstLayer + 1;
-                            int cpuFloatOffset = (int) ((long) floatSize * firstLayer / totalLayers);
-                            int cpuByteOffset = (int) ((long) totalByteSize * firstLayer / totalLayers);
-                            int cpuByteSize = (int) ((long) totalByteSize * cpuLayers / totalLayers);
+                            int cpuFloatOffset = Math.toIntExact((long) floatSize * firstLayer / totalLayers);
+                            int cpuByteOffset = Math.toIntExact((long) totalByteSize * firstLayer / totalLayers);
+                            int cpuByteSize = Math.toIntExact((long) totalByteSize * cpuLayers / totalLayers);
 
                             byte[] cpuData = new byte[cpuByteSize];
                             byteBuffer.rewind();
@@ -319,9 +319,9 @@ public class TransformerWeights {
                         int lastLayer = c.layerAllocation.lastCPULayer;
                         if (firstLayer == 0) {
                             int cpuLayers = lastLayer - firstLayer + 1;
-                            int cpuFloatOffset = (int) ((long) floatSize * firstLayer / totalLayers);
-                            int cpuByteOffset = (int) ((long) totalByteSize * firstLayer / totalLayers);
-                            int cpuByteSize = (int) ((long) totalByteSize * cpuLayers / totalLayers);
+                            int cpuFloatOffset = Math.toIntExact((long) floatSize * firstLayer / totalLayers);
+                            int cpuByteOffset = Math.toIntExact((long) totalByteSize * firstLayer / totalLayers);
+                            int cpuByteSize = Math.toIntExact((long) totalByteSize * cpuLayers / totalLayers);
 
                             byte[] cpuData = new byte[cpuByteSize];
                             byteBuffer.rewind();
