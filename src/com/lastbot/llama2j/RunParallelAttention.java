@@ -340,8 +340,6 @@ public class RunParallelAttention {
         SlicePointer l_value_cacheCU = s.l_value_cacheCU[dev];
 
         Pointer tmp1CU = s.tmp1CU[dev];
-        Pointer tmp2CU = s.tmp2CU[dev];
-        Pointer tmp3CU = s.tmp3CU[dev];
 
         // use first device weight variables
 
@@ -395,8 +393,6 @@ public class RunParallelAttention {
                 l_value_cacheCU = s.l_value_cacheCU[dev];
 
                 tmp1CU = s.tmp1CU[dev];
-                tmp2CU = s.tmp2CU[dev];
-                tmp3CU = s.tmp3CU[dev];
 
                 // roll over to new device weight variables (no need to copy anything)
 
