@@ -10,7 +10,7 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class ExpSumNormalize extends Kernel {
-    public static final int BLOCK_SIZE = 16;
+    public static final int BLOCK_SIZE = 128;
 
     private final CUfunction smallKernel;
 
@@ -99,7 +99,6 @@ public class ExpSumNormalize extends Kernel {
                                     localSum += value;
                                 }
                             }
-                            __syncthreads();
                             
                             // Store the localSum in shared memory for reduction
                             sdata[threadIdx.x] = localSum;
@@ -114,8 +113,6 @@ public class ExpSumNormalize extends Kernel {
                                 __syncthreads();  // Ensure all threads in block are in sync after each step
                             }
 
-                            __syncthreads();
-                            
                             float finalSum = sdata[0];
 
                             for (int i = start; i < end; i++) {
