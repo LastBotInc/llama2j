@@ -41,13 +41,6 @@ public class TransformerWeights {
     // (optional) classifier weights for the logits, on the last layer
     float[] wcls;
 
-    public static void writeArray(DataOutputStream dos, float[] d) throws IOException {
-        dos.writeInt(d.length);
-        for (float v : d) {
-            dos.writeFloat(v);
-        }
-    }
-
     public TransformerWeights(Context c, BinFileReader reader, Config p, Quant quant, boolean sharedWeights)
             throws IOException {
         this.quant = quant;
