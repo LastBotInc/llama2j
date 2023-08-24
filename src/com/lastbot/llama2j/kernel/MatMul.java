@@ -33,20 +33,17 @@ public class MatMul extends Kernel {
             final int end = Math.min(d, (threadId + 1) * sizePerThread);
             int finalThreadId = threadId;
             Thread.ofVirtual().start(() -> {
-                try {
-                    float val;
-                    int weightPos;
-                    for (int i = finalThreadId * sizePerThread; i < end; i++) {
-                        val = 0.0f;
-                        weightPos = weightIndex + i * n;
-                        for (int j = 0; j < n; j++) {
-                            val += w[weightPos + j] * x[j];
-                        }
-                        xout[i] = val;
+                float val;
+                int weightPos;
+                for (int i = finalThreadId * sizePerThread; i < end; i++) {
+                    val = 0.0f;
+                    weightPos = weightIndex + i * n;
+                    for (int j = 0; j < n; j++) {
+                        val += w[weightPos + j] * x[j];
                     }
-                } finally {
-                    latch.countDown();
+                    xout[i] = val;
                 }
+                latch.countDown();
             });
         }
         try {
@@ -257,10 +254,10 @@ public class MatMul extends Kernel {
     public void callI8(int streamId, Pointer xout, Pointer x, QuantPointer w, int weightIndex, int n, int d) {
         Pointer encoded = w.getPointer();
         Quant q = w.getQuant();
-        if ((long)weightIndex - w.getFloatOffset() < 0) {
+        if ((long) weightIndex - w.getFloatOffset() < 0) {
             throw new RuntimeException("(long)weightIndex - w.getFloatOffset() < 0)");
         }
-        if ((long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE) {
+        if ((long) weightIndex - w.getFloatOffset() > Integer.MAX_VALUE) {
             throw new RuntimeException("(long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE");
         }
         int adjustedWeightIndex = (int) (weightIndex - w.getFloatOffset());
@@ -311,20 +308,20 @@ public class MatMul extends Kernel {
 
                                 if (i < d) {
                                     int weightPos;
-    
+                            
                                     int startGroupIndex;
                                     int endGroupIndex;
-    
+                            
                                     float min;
                                     float max;
                                     float range;
                                     int groupBase;
                                     int groupPayloadBase;
                                     int jj;
-    
+                            
                                     int index = 0;
                                     float val;
-    
+                            
                                     int startFloatIndex;
 
                                     weightPos = weightIndex + i * n;
