@@ -10,7 +10,7 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class ExpSumNormalize extends Kernel {
-    public static final int BLOCK_SIZE = 256;
+    public static final int BLOCK_SIZE = 16;
 
     private final CUfunction smallKernel;
 
@@ -19,9 +19,9 @@ public class ExpSumNormalize extends Kernel {
         smallKernel = createSmall();
     }
 
-    public static void call(float[] x, float[] maxValue, int index, int size) {
+    public static void call(float[] x, float[] maxValue, int maxIndex, int index, int size) {
         float sum = 0.0f;
-        float max_val = maxValue[0];
+        float max_val = maxValue[maxIndex];
 
         for (int i = 0; i < size; i++) {
             x[index + i] = (float) Math.exp(x[index + i] - max_val);
@@ -34,32 +34,34 @@ public class ExpSumNormalize extends Kernel {
         }
     }
 
-    public void test(float[] x, float[] maxValue, int index, int size) {
+    public void test(float[] x, float[] maxValue, int maxIndex, int index, int size) {
         float[] copyOfx = Arrays.copyOf(x, x.length);
         Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
         Pointer pMaxValue = cuda.allocateAndCopyToDevice(TEST_STREAM, maxValue, false);
         cuda.synchronizeStream(TEST_STREAM);
-        call(TEST_STREAM, px, pMaxValue, index, size);
+        call(TEST_STREAM, px, pMaxValue, maxIndex, index, size);
+
         cuda.synchronizeStream(TEST_STREAM);
         cuda.copyFromDeviceToHost(TEST_STREAM, px, x.length, x);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(px);
         cuda.free(pMaxValue);
 
-        call(copyOfx, maxValue, index, size);
+        call(copyOfx, maxValue, maxIndex, index, size);
 
         compareWithThreshold("ExpAndSum.call x ",
                 x, copyOfx, 1e-5f);
     }
 
-    public void call(int streamId, Pointer x, Pointer maxValue, int index, int size) {
+    public void call(int streamId, Pointer x, Pointer maxValue, int maxIndex, int index, int size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
         int sharedMemory = BLOCK_SIZE * Float.BYTES;
-        // __global__ void expAndSumSmall(float* x, float* maxValue, int index, int size) {
+//        __global__ void expAndSumSmall(float* x, float* maxValue, int index, int maxIndex, int size) {
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(x),
                 Pointer.to(maxValue),
                 Pointer.to(new int[]{index}),
+                Pointer.to(new int[]{maxIndex}),
                 Pointer.to(new int[]{size})
         );
 
@@ -78,14 +80,14 @@ public class ExpSumNormalize extends Kernel {
         String code =
                 """
                         extern "C"
-                        __global__ void expAndSumSmall(float* x, float* maxValue, int index, int size) {
+                        __global__ void expAndSumSmall(float* x, float* maxValue, int index, int maxIndex, int size) {
                             extern __shared__ float sdata[];
 
                             int itemsPerThread = size / blockDim.x + 1;
                             int start = threadIdx.x * itemsPerThread;
                             int end = start + itemsPerThread;
 
-                            float max_val = maxValue[0];
+                            float max_val = maxValue[maxIndex];
 
                             float value;
                             float localSum = 0.0f;
