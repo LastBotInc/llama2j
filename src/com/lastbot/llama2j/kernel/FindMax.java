@@ -26,34 +26,34 @@ public class FindMax extends Kernel {
         findMaxKernel = createFindMax();
     }
 
-    public static void call(float[] max, float[] x, int index, int size) {
+    public static void call(float[] max, int maxIndex, float[] x, int index, int size) {
         float max_val = x[index]; // index + 0
         for (int i = 1; i < size; i++) {
             if (x[index + i] > max_val) {
                 max_val = x[index + i];
             }
         }
-        max[0] = max_val;
+        max[maxIndex] = max_val;
     }
 
-    public void test(float[] max, float[] x, int index, int size) {
+    public void test(float[] max, int maxIndex, float[] x, int index, int size) {
         float[] copyOfMax = Arrays.copyOf(max, max.length);
         Pointer pMax = cuda.allocateAndCopyToDevice(TEST_STREAM, max, false);
         Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
-        call(TEST_STREAM, pMax, px, index, size);
+        call(TEST_STREAM, pMax, maxIndex, px, index, size);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.copyFromDeviceToHost(TEST_STREAM, pMax, max.length, max);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pMax);
         cuda.free(px);
 
-        call(copyOfMax, x, index, size);
+        call(copyOfMax, maxIndex, x, index, size);
 
         compareWithThreshold("FindMax.call max (size " + size + ")",
                 max, copyOfMax, 1e-2f);
     }
 
-    public void call(int streamId, Pointer max, Pointer x, int index, int size) {
+    public void call(int streamId, Pointer max, int maxIndex, Pointer x, int index, int size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
 
         if (size == 1) {
@@ -66,7 +66,7 @@ public class FindMax extends Kernel {
                     Pointer.to(new int[]{index}),
                     Pointer.to(new int[]{size}),
                     Pointer.to(max),
-                    Pointer.to(new int[]{0})
+                    Pointer.to(new int[]{maxIndex})
             );
             isError(cuLaunchKernel(simpleKernel,
                     1, 1, 1,          // Grid dimension
@@ -78,13 +78,14 @@ public class FindMax extends Kernel {
                 cuda.synchronizeStream(streamId);
             }
         } else { // parallel
-//            _global__ void findMax(float *d_input, float *d_output, int index, int size) {
+//            __global__ void findMax(float* d_input, int inputIndex, int inputSize,
+//            float* max, int maxIndex) {
             Pointer kernelParameters = Pointer.to(
                     Pointer.to(x),
                     Pointer.to(new int[]{index}),
                     Pointer.to(new int[]{size}),
                     Pointer.to(max),
-                    Pointer.to(new int[]{0})
+                    Pointer.to(new int[]{maxIndex})
             );
             isError(cuLaunchKernel(findMaxKernel,
                     (size + BLOCK_SIZE - 1) / BLOCK_SIZE, 1, 1,          // Grid dimension
