@@ -105,6 +105,8 @@ achieved tok/s: 5.49
 
 achieved tok/s: 5.67
 
+- updated
+achieved tok/s: 5.09
 
 ---------------- llama2j ----------------
 CUDA llama2_7b.bin 2 GPU
