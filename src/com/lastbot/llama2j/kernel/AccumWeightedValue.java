@@ -104,7 +104,7 @@ public class AccumWeightedValue extends Kernel {
         //        __global__ void accumWeightedValue(float* xb, float* att, float* l_value_cache,
         //        int pos, int xbIndex, int valueBase, int head_size,
         //        int kv_dim, int attentionIndex)
-        int offsetValueBase = valueBase - (int) slidedL_value_cache.floatOffset(); // note conversion
+        int offsetValueBase = valueBase - Math.toIntExact(slidedL_value_cache.floatOffset()); // note conversion
         Pointer l_value_cache = slidedL_value_cache.pointer();
 
         Pointer kernelParameters = Pointer.to(

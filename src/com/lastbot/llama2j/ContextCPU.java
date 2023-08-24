@@ -11,7 +11,7 @@ public class ContextCPU implements Closeable {
 
     public float[] allocateFloatArray(long elements) {
         if (elements <= Limits.ARRAY_MAX_SIZE) {
-            int size = (int) elements;
+            int size = Math.toIntExact(elements);
             return new float[size];
         }
 
@@ -26,7 +26,7 @@ public class ContextCPU implements Closeable {
 
     public int[] allocateIntArray(long elements) {
         if (elements <= Limits.ARRAY_MAX_SIZE) {
-            int size = (int) elements;
+            int size = Math.toIntExact(elements);
             return new int[size];
         }
 

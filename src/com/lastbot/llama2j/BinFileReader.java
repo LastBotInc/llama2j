@@ -55,7 +55,7 @@ public class BinFileReader implements Closeable {
 
         long remaining = bytes;
         while (remaining > 0) {
-            int size = (int) Math.min(Limits.ARRAY_MAX_SIZE, remaining);
+            int size = Math.toIntExact(Math.min(Limits.ARRAY_MAX_SIZE, remaining));
             try {
                 MappedByteBuffer byteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, readSize, size);
                 byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
@@ -111,7 +111,7 @@ public class BinFileReader implements Closeable {
         if (totalBytes % Float.BYTES != 0) {
             throw new RuntimeException("totalBytes % Float.BYTES != 0");
         }
-        int totalFloats = (int) (totalBytes / Float.BYTES);
+        int totalFloats = Math.toIntExact(totalBytes / Float.BYTES);
 
         if (totalFloats != floatCount) {
             throw new RuntimeException("totalFloats != floatCount");
@@ -144,7 +144,7 @@ public class BinFileReader implements Closeable {
         if (totalBytes % Integer.BYTES != 0) {
             throw new RuntimeException("totalBytes % Int.BYTES != 0");
         }
-        int totalInts = (int) (totalBytes / Integer.BYTES);
+        int totalInts = Math.toIntExact(totalBytes / Integer.BYTES);
 
         if (totalInts != intCount) {
             throw new RuntimeException("totalInts != intCount");

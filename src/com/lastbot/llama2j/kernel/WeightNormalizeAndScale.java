@@ -149,7 +149,7 @@ public class WeightNormalizeAndScale extends Kernel {
         if ((long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE) {
             throw new RuntimeException("(long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE");
         }
-        int adjustedWeightIndex = (int) (weightIndex - w.getFloatOffset());
+        int adjustedWeightIndex = Math.toIntExact(weightIndex - w.getFloatOffset());
 
         int groupSize = q.groupSize();
         int startGroupIndex = q.groupIndexByFloatIndex(adjustedWeightIndex);

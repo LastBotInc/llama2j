@@ -18,7 +18,7 @@ public class QuantPointer {
     }
 
     public Pointer pointerOfFloatIndex(int floatIndex) {
-        int adjustedFloatIndex =  (int) (floatIndex - floatOffset);
+        int adjustedFloatIndex = Math.toIntExact(floatIndex - floatOffset);
         if (adjustedFloatIndex < 0) {
             throw new RuntimeException("adjustedFloatIndex < 0");
         }

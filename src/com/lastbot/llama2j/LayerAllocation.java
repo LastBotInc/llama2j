@@ -73,7 +73,7 @@ public class LayerAllocation {
 
             int nextLayer = 0;
             for (int dev = 0; dev < deviceCount; dev++) {
-                int layersPerDevice = (int) Math.round(layerBytes[dev] * layerUtilization / bytesPerLayer);
+                int layersPerDevice = Math.toIntExact(Math.round(layerBytes[dev] * layerUtilization / bytesPerLayer));
                 // adjust lower as needed
                 while (staticBytes + layersPerDevice * bytesPerLayer > gpuMem[dev]) {
                     layersPerDevice--;
