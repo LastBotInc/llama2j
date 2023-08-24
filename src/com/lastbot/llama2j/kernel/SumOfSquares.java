@@ -88,7 +88,6 @@ public class SumOfSquares extends Kernel {
                                     float localSum = 0.0f;
                                     for (int i = start; i < end; i++) {
                                         if (i < size) {
-                                            assert(isfinite(x[i]));
                                             value = x[i] * x[i];
                                             localSum += value;
                                         }
