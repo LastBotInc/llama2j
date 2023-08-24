@@ -11,7 +11,7 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class SumOfSquares extends Kernel {
-    public static final int BLOCK_SIZE = 16;
+    public static final int BLOCK_SIZE = 256;
 
     private final CUfunction smallKernel;
 
@@ -94,8 +94,6 @@ public class SumOfSquares extends Kernel {
                                         }
                                     }
                                     
-                                    __syncthreads();  // Ensure all threads in block have stored their values
-
                                     // Store the localSum in shared memory for reduction
                                     sdata[threadIdx.x] = localSum;
 
@@ -108,8 +106,6 @@ public class SumOfSquares extends Kernel {
                                         }
                                         __syncthreads();  // Ensure all threads in block are in sync after each step
                                     }
-
-                                    __syncthreads();  // Ensure all threads in block have stored their values
 
                                     if (threadIdx.x == 0) {
                                         float ss = sdata[0];
