@@ -120,9 +120,26 @@ public class Run {
 
                     int keyBase = loff + (finalH / kv_mul) * head_size;
 
-                    AttentionLoop.call(s.q, s.l_key_cache, s.att, null, attentionIndex, keyBase,
+                    int maxIndex = finalH;
+
+                    AttentionLoop.call(s.q, s.l_key_cache, s.att, s.tmp1, maxIndex, attentionIndex, keyBase,
                             kv_dim, queryIndex, pos, head_size);
 
+                    // softmax the scores to get attention weights, from 0..pos inclusively
+//                softmax(s.att, attentionIndex, pos + 1);
+
+                    // find max value (for numerical stability)
+//                    FindMax.call(s.tmp1, maxIndex, s.att, attentionIndex, pos + 1);
+
+                    // exp and sum
+                    ExpSumNormalize.call(s.att, s.tmp1, maxIndex, attentionIndex, pos + 1);
+
+                    // weighted sum of the values, store back into xb
+                    int xbIndex = finalH * head_size;
+
+                    int valueBase = loff + (finalH / kv_mul) * head_size;
+                    AccumWeightedValue.call(s.xb, s.att, s.l_value_cache, pos, xbIndex,
+                            valueBase, head_size, kv_dim, attentionIndex);
                     latch.countDown();
                 });
             }
@@ -130,33 +147,6 @@ public class Run {
                 latch.await();
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
-            }
-            // multihead attention. iterate over all heads
-            for (h = 0; h < p.n_heads; h++) {
-                // attention scores for this head
-                int attentionIndex = h * p.seq_len;
-
-                // softmax the scores to get attention weights, from 0..pos inclusively
-//                softmax(s.att, attentionIndex, pos + 1);
-
-                // find max value (for numerical stability)
-                // redundant
-//                MemZeroFloat.call(s.tmp1, 0, 1);
-                FindMax.call(s.tmp1, s.att, attentionIndex, pos + 1);
-
-                // exp and sum
-                // redundant
-//                MemZeroFloat.call(s.tmp2, 0, 1);
-                ExpSumNormalize.call(s.att, s.tmp1, attentionIndex, pos + 1);
-
-                // weighted sum of the values, store back into xb
-                // todo zzz consider removing zeroing and integrating that into AccumWeightedValue
-                // feasibility depends on if the performance will be worse if we switch the inner and outer loops
-                int xbIndex = h * head_size;
-
-                int valueBase = loff + (h / kv_mul) * head_size;
-                AccumWeightedValue.call(s.xb, s.att, s.l_value_cache, pos, xbIndex,
-                        valueBase, head_size, kv_dim, attentionIndex);
             }
 
             // final matmul to get the output of the attention
@@ -179,16 +169,6 @@ public class Run {
             // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
             // elementwise multiply with w3(x)
             Silu.call(s.hb, s.hb2, hidden_dim);
-
-//            // F.silu; silu(x)=x*σ(x),where σ(x) is the logistic sigmoid
-//            for (int i = 0; i < hidden_dim; i++) {
-//                s.hb[i] = s.hb[i] * (float) (1.0f / (1.0f + Math.exp((-s.hb[i]))));
-//            }
-//
-//            // elementwise multiply with w3(x)
-//            for (int i = 0; i < hidden_dim; i++) {
-//                s.hb[i] = s.hb[i] * s.hb2[i];
-//            }
 
             // final matmul to get the output of the ffn
             MatMul.callI8(s.xb, s.hb, w.l_w2, l * dim * hidden_dim, hidden_dim, dim);
@@ -240,10 +220,6 @@ public class Run {
 //            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
             cuda.sumOfSquares.test(s.tmp1, s.x, dim);
 
-//            if (l == 0) {
-//                summarize(pos, "s.x", s.x);
-//            }
-
             cuda.weightNormalizeAndScale.testI8(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
             // qkv matmuls for this position
@@ -276,7 +252,9 @@ public class Run {
 
                 int keyBase = loff + (h / kv_mul) * head_size;
 
-                cuda.attentionLoop.test(s.q, s.l_key_cache, s.att, s.tmp1, attentionIndex, keyBase,
+                int maxIndex = h;
+
+                cuda.attentionLoop.test(s.q, s.l_key_cache, s.att, s.tmp1, maxIndex, attentionIndex, keyBase,
                         kv_dim, queryIndex, pos, head_size);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
@@ -285,7 +263,7 @@ public class Run {
                 // exp and sum
                 // redundant
 //                cuda.memZeroFloat.test(s.tmp2, 0, 1);
-                cuda.expSumNormalize.test(s.att, s.tmp1, attentionIndex, pos + 1);
+                cuda.expSumNormalize.test(s.att, s.tmp1, maxIndex, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
@@ -478,6 +456,7 @@ public class Run {
                     l_value_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
 
             // multihead attention. iterate over all heads
+            // CountDownLatch latch = new CountDownLatch(p.n_heads);
             int maxStream = 0;
             int h;
             for (h = 0; h < p.n_heads; h++) {
@@ -491,22 +470,27 @@ public class Run {
                               (int) l_key_cacheCU.floatOffset();
 
                 int streamId = 0;
+                int maxIndex = h;
 
-                // tmp1CU collect max values per head, and is used in expAndSum below
-                cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU, tmp1CU,
+                // tmp1CU collects max values per head, and is used in ExpSumNormalize below
+//                cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU, tmp1CU, maxIndex,
+//                        attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
+                cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU, tmp1CU, maxIndex,
                         attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
+
+//                cuda.findMax.call(streamId, tmp1CU, maxIndex, attCU, attentionIndex, pos + 1);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
 
                 // exp and sum
-                cuda.expSumNormalize.call(0, attCU, tmp1CU, attentionIndex, pos + 1);
+                cuda.expSumNormalize.call(streamId, attCU, tmp1CU, maxIndex, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
                 int xbIndex = h * head_size;
 
                 int valueBase = loff + (h / kv_mul) * head_size;
-                cuda.accumWeightedValue.call(0, xbCU, attCU, l_value_cacheCU, pos, xbIndex,
+                cuda.accumWeightedValue.call(streamId, xbCU, attCU, l_value_cacheCU, pos, xbIndex,
                         valueBase, head_size, kv_dim, attentionIndex);
             }
 
@@ -714,10 +698,10 @@ public class Run {
 
                         // find max value (for numerical stability)
                         float[] max = {0f};
-                        FindMax.call(max, logits, 0, p.vocab_size);
+                        FindMax.call(max, 0, logits, 0, p.vocab_size);
 
                         // exp and sum
-                        ExpSumNormalize.call(logits, max, 0, p.vocab_size);
+                        ExpSumNormalize.call(logits, max, 0, 0, p.vocab_size);
 
                         if (commandLine.getTopp() > 0.999) {
                             // we sample from this distribution to get the next token
