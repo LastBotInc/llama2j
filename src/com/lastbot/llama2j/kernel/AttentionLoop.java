@@ -1,6 +1,7 @@
 package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
+import com.lastbot.llama2j.LLogger;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUfunction;
@@ -21,7 +22,7 @@ public class AttentionLoop extends Kernel {
         kernel = create();
     }
 
-    public static void call(float[] q, float[] l_key_cache, float[] att, float[] max, int attentionIndex,
+    public static void call(float[] q, float[] l_key_cache, float[] att, float[] max, int maxIndex, int attentionIndex,
                             int keybase, int kv_dim, int queryIndex, int pos, int head_size) {
         // iterate over all timesteps, including the current one
         float headMax = -Float.MAX_VALUE;
@@ -43,48 +44,53 @@ public class AttentionLoop extends Kernel {
             att[attentionIndex + t] = score / (float) Math.sqrt(head_size);
             // store max if needed
             if (max != null) {
-                max[0] = Math.max(max[0], headMax);
+                max[maxIndex] = Math.max(max[maxIndex], headMax);
             }
         }
     }
 
-    public void test(float[] q, float[] l_key_cache, float[] att, float[] max, int attentionIndex,
+    public void test(float[] q, float[] l_key_cache, float[] att, float[] max, int maxIndex, int attentionIndex,
                      int keybase, int kv_dim, int queryIndex, int pos, int head_size) {
         float[] copyOfAtt = Arrays.copyOf(att, att.length);
+        float[] copyOfMax = Arrays.copyOf(max, max.length);
         Pointer pq = cuda.allocateAndCopyToDevice(TEST_STREAM, q, false);
         Pointer pL_key_cache = cuda.allocateAndCopyToDevice(
                 TEST_STREAM, l_key_cache, false);
         Pointer pAtt = cuda.allocateAndCopyToDevice(TEST_STREAM, att, false);
-        Pointer tmp = cuda.allocate(Sizeof.FLOAT);
+        Pointer pMax = cuda.allocateAndCopyToDevice(TEST_STREAM, max, false);
         cuda.synchronizeStream(TEST_STREAM);
-        call(TEST_STREAM, pq, pL_key_cache, pAtt, tmp, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
+        call(TEST_STREAM, pq, pL_key_cache, pAtt, pMax, maxIndex, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.copyFromDeviceToHost(TEST_STREAM, pAtt, att.length, att);
+        cuda.copyFromDeviceToHost(TEST_STREAM, pMax, max.length, max);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pq);
         cuda.free(pL_key_cache);
-        cuda.free(tmp);
+        cuda.free(pMax);
 
-        call(q, l_key_cache, copyOfAtt, max, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
+        call(q, l_key_cache, copyOfAtt, copyOfMax, maxIndex, attentionIndex, keybase, kv_dim, queryIndex, pos, head_size);
 
         compareWithThreshold("AttentionLoop.call att ",
                 att, copyOfAtt, 1e-5f);
+        compareWithThreshold("AttentionLoop.call max ",
+                max, copyOfMax, 1e-5f);
     }
 
-    public void call(int streamId, Pointer q, Pointer l_key_cache, Pointer att, Pointer max, int attentionIndex,
-                     int keybase, int kv_dim, int queryIndex, int pos, int head_size) {
+    public void call(int streamId, Pointer q, Pointer l_key_cache, Pointer att, Pointer max, int maxIndex,
+                     int attentionIndex, int keybase, int kv_dim, int queryIndex, int pos, int head_size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
         int size = pos + 1;
         int blockSizeX = findNextPowerOf2(size);
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
 //        __global__ void attentionLoop(float* q, float* l_key_cache, float* att, float* max,
-//        int attentionIndex, int keybase, int kv_dim, int pos, int head_size) {
+//        int maxIndex, int attentionIndex, int keybase, int kv_dim, int pos, int head_size) {
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(q.withByteOffset((long) queryIndex * Sizeof.FLOAT)),
                 Pointer.to(l_key_cache),
                 Pointer.to(att),
                 Pointer.to(max),
+                Pointer.to(new int[]{maxIndex}),
                 Pointer.to(new int[]{attentionIndex}),
                 Pointer.to(new int[]{keybase}),
                 Pointer.to(new int[]{kv_dim}),
@@ -122,7 +128,7 @@ public class AttentionLoop extends Kernel {
 
                             extern "C"
                             __global__ void attentionLoop(float* q, float* l_key_cache, float* att, float* max,
-                            int attentionIndex, int keybase, int kv_dim, int pos, int head_size) {
+                            int maxIndex, int attentionIndex, int keybase, int kv_dim, int pos, int head_size) {
                                     int t = blockIdx.x * blockDim.x + threadIdx.x;
 
                                     if (t <= pos) // NOTE: including current position
@@ -140,7 +146,11 @@ public class AttentionLoop extends Kernel {
                                         }
                                         // save the score to the attention buffer
                                         att[attentionIndex + t] = score / (float) sqrtf(head_size);
-                                        atomicMax(max, headMax);
+                                        // save max
+                                        if (max != NULL) {
+                                            float *maxAddress = max + maxIndex;
+                                            atomicMax(maxAddress, headMax);
+                                        }
                                     }
                                 }
                         """;
