@@ -1,6 +1,7 @@
 package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
+import com.lastbot.llama2j.LLogger;
 import jcuda.Pointer;
 import jcuda.driver.CUfunction;
 import jcuda.driver.CUstream;
@@ -10,7 +11,7 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class SumOfSquares extends Kernel {
-    public static final int BLOCK_SIZE = 256;
+    public static final int BLOCK_SIZE = 16;
 
     private final CUfunction smallKernel;
 
@@ -75,45 +76,50 @@ public class SumOfSquares extends Kernel {
     private CUfunction createSmall() {
         String code =
                 """
-                    extern "C"
-                    __global__ void sumOfSquares(float* sum, float* x, int size) {
-                            extern __shared__ float sdata[];
+                            extern "C"
+                            __global__ void sumOfSquares(float* sum, float* x, int size) {
+                                    extern __shared__ float sdata[];
 
-                            int itemsPerThread = size / blockDim.x + 1;
-                            int start = threadIdx.x * itemsPerThread;
-                            int end = start + itemsPerThread;
+                                    int itemsPerThread = size / blockDim.x + 1;
+                                    int start = threadIdx.x * itemsPerThread;
+                                    int end = start + itemsPerThread;
 
-                            float value;
-                            float localSum = 0.0f;
-                            for (int i = start; i < end; i++) {
-                                if (i < size) {
-                                    value = x[i] * x[i];
-                                    localSum += value;
-                                }
+                                    float value;
+                                    float localSum = 0.0f;
+                                    for (int i = start; i < end; i++) {
+                                        if (i < size) {
+                                            assert(isfinite(x[i]));
+                                            value = x[i] * x[i];
+                                            localSum += value;
+                                        }
+                                    }
+                                    
+                                    __syncthreads();  // Ensure all threads in block have stored their values
+
+                                    // Store the localSum in shared memory for reduction
+                                    sdata[threadIdx.x] = localSum;
+
+                                    __syncthreads();  // Ensure all threads in block have stored their values
+
+                                    // Block-wise reduction
+                                    for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+                                        if (threadIdx.x < stride && (threadIdx.x + stride) < blockDim.x) {
+                                            sdata[threadIdx.x] += sdata[threadIdx.x + stride];
+                                        }
+                                        __syncthreads();  // Ensure all threads in block are in sync after each step
+                                    }
+
+                                    __syncthreads();  // Ensure all threads in block have stored their values
+
+                                    if (threadIdx.x == 0) {
+                                        float ss = sdata[0];
+                                        ss /= size;
+                                        ss += 1e-5f;
+                                        ss = rsqrtf(ss);
+                                        sum[0] = ss;
+                                    }
                             }
-                            
-                            // Store the localSum in shared memory for reduction
-                            sdata[threadIdx.x] = localSum;
-
-                            __syncthreads();  // Ensure all threads in block have stored their values
-
-                            // Block-wise reduction
-                            for (unsigned int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-                                if (threadIdx.x < stride && (threadIdx.x + stride) < blockDim.x) {
-                                    sdata[threadIdx.x] += sdata[threadIdx.x + stride];
-                                }
-                                __syncthreads();  // Ensure all threads in block are in sync after each step
-                            }
-
-                            if (threadIdx.x == 0) {
-                                float ss = sdata[0];
-                                ss /= size;
-                                ss += 1e-5f;
-                                ss = sqrtf(ss);
-                                sum[0] = ss;
-                            }
-                    }
-                """;
+                        """;
         return loadFromCode(code, "sumOfSquares");
     }
 }
