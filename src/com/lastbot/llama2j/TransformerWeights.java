@@ -38,9 +38,6 @@ public class TransformerWeights {
     QuantArray l_w3; // (layer, hidden_dim, dim)
     // final rmsnorm
     QuantArray rms_final_weight; // (dim,)
-    // freq_cis for RoPE relatively positional embeddings
-    float[] freq_cis_real; // (seq_len, head_size/2)
-    float[] freq_cis_imag; // (seq_len, head_size/2)
     // (optional) classifier weights for the logits, on the last layer
     float[] wcls;
 
@@ -127,8 +124,8 @@ public class TransformerWeights {
             throw new RuntimeException(e);
         }
 
-        freq_cis_real = reader.nextFloatArray(p.seq_len * head_size / 2);
-        freq_cis_imag = reader.nextFloatArray(p.seq_len * head_size / 2);
+        reader.skipFloats(p.seq_len * head_size / 2); // freq_cis_real
+        reader.skipFloats(p.seq_len * head_size / 2); // freq_cis_imag
 
         wcls = sharedWeights ? token_embedding_table : reader.nextFloatArray(p.vocab_size * p.dim);
 
@@ -136,15 +133,11 @@ public class TransformerWeights {
         if (c.layerAllocation.deviceCount > 0) {
             int n = c.layerAllocation.deviceCount;
             token_embedding_tableCU = new Pointer[n];
-            freq_cis_realCU = new Pointer[n];
-            freq_cis_imagCU = new Pointer[n];
             wclsCU = new Pointer[n];
 
             for (int dev = 0; dev < c.layerAllocation.deviceCount; dev++) {
                 ContextCUDA cu = c.cudas[dev];
                 token_embedding_tableCU[dev] = cu.allocateAndCopyToDevice(0, token_embedding_table, true);
-                freq_cis_realCU[dev] = cu.allocateAndCopyToDevice(0, freq_cis_real, true);
-                freq_cis_imagCU[dev] = cu.allocateAndCopyToDevice(0, freq_cis_imag, true);
                 wclsCU[dev] = sharedWeights ? token_embedding_tableCU[dev] :
                         cu.allocateAndCopyToDevice(0, wcls, true);
             }
@@ -197,8 +190,6 @@ public class TransformerWeights {
     QuantPointer[] l_w2CU; // (layer, dim, hidden_dim)
     QuantPointer[] l_w3CU; // (layer, hidden_dim, dim)
     QuantPointer[] rms_final_weightCU; // (dim,)
-    Pointer[] freq_cis_realCU; // (seq_len, dim/2)
-    Pointer[] freq_cis_imagCU; // (seq_len, dim/2)
     Pointer[] wclsCU;
 
     private interface QuantReadProcessor {

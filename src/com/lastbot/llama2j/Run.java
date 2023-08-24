@@ -76,9 +76,6 @@ public class Run {
         // copy the token embedding into x
         System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
 
-        // pluck out the "pos" row of freq_cis_real and freq_cis_imag
-        int freq_cis_imag_row = pos * head_size / 2;
-
         // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
             // attention rmsnorm
@@ -202,9 +199,6 @@ public class Run {
 
         // copy the token embedding into x
         System.arraycopy(w.token_embedding_table, token * dim, s.x, 0, dim);
-
-        // pluck out the "pos" row of freq_cis_real and freq_cis_imag
-        int freq_cis_imag_row = pos * head_size / 2;
 
         // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
@@ -340,8 +334,6 @@ public class Run {
         SlicePointer l_value_cacheCU = s.l_value_cacheCU[dev];
 
         Pointer tmp1CU = s.tmp1CU[dev];
-        Pointer tmp2CU = s.tmp2CU[dev];
-        Pointer tmp3CU = s.tmp3CU[dev];
 
         // use first device weight variables
 
@@ -356,8 +348,6 @@ public class Run {
         QuantPointer l_w2CU = w.l_w2CU[dev];
         QuantPointer l_w3CU = w.l_w3CU[dev];
         QuantPointer rms_final_weightCU = w.rms_final_weightCU[dev];
-        Pointer freq_cis_realCU = w.freq_cis_realCU[dev];
-        Pointer freq_cis_imagCU = w.freq_cis_imagCU[dev];
         Pointer wclsCU = w.wclsCU[dev];
 
         // copy the token embedding into x
@@ -397,8 +387,6 @@ public class Run {
                 l_value_cacheCU = s.l_value_cacheCU[dev];
 
                 tmp1CU = s.tmp1CU[dev];
-                tmp2CU = s.tmp2CU[dev];
-                tmp3CU = s.tmp3CU[dev];
 
                 // roll over to new device weight variables (no need to copy anything)
 
@@ -413,8 +401,6 @@ public class Run {
                 l_w2CU = w.l_w2CU[dev];
                 l_w3CU = w.l_w3CU[dev];
                 rms_final_weightCU = w.rms_final_weightCU[dev];
-                freq_cis_realCU = w.freq_cis_realCU[dev];
-                freq_cis_imagCU = w.freq_cis_imagCU[dev];
                 wclsCU = w.wclsCU[dev];
 
                 newCuda.synchronizeStream(0);

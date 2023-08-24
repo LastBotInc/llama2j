@@ -356,8 +356,6 @@ public class RunParallelAttention {
         QuantPointer l_w2CU = w.l_w2CU[dev];
         QuantPointer l_w3CU = w.l_w3CU[dev];
         QuantPointer rms_final_weightCU = w.rms_final_weightCU[dev];
-        Pointer freq_cis_realCU = w.freq_cis_realCU[dev];
-        Pointer freq_cis_imagCU = w.freq_cis_imagCU[dev];
         Pointer wclsCU = w.wclsCU[dev];
 
         // copy the token embedding into x
@@ -413,8 +411,6 @@ public class RunParallelAttention {
                 l_w2CU = w.l_w2CU[dev];
                 l_w3CU = w.l_w3CU[dev];
                 rms_final_weightCU = w.rms_final_weightCU[dev];
-                freq_cis_realCU = w.freq_cis_realCU[dev];
-                freq_cis_imagCU = w.freq_cis_imagCU[dev];
                 wclsCU = w.wclsCU[dev];
 
                 newCuda.synchronizeStream(0);
