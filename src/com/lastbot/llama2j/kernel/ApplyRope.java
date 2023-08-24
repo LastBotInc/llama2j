@@ -20,70 +20,63 @@ public class ApplyRope extends Kernel {
         this.kernel = create();
     }
 
-    public static void call(float[] q, float[] k, float[] freq_cis_real, float[] freq_cis_imag,
-                            int dim, int kv_dim, int head_size, int freq_cis_imag_row) {
+    public static void call(float[] q, float[] k, int pos, int dim, int kv_dim, int head_size) {
         // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
         // keys
         for (int i = 0; i < dim; i += 2) {
+            int head_dim = i % head_size;
+            float freq = (float) (1.0f / Math.pow(10000.0f, head_dim / (float)head_size));
+            float val = pos * freq;
+            float fcr = (float) Math.cos(val);
+            float fci = (float) Math.sin(val);
             float v0 = q[i];
             float v1 = q[i + 1];
-            int freq_cis_imag_index = freq_cis_imag_row + (i % head_size) / 2;
-            float fcr = freq_cis_real[freq_cis_imag_index];
-            float fci = freq_cis_imag[freq_cis_imag_index];
             q[i] = v0 * fcr - v1 * fci;
             q[i + 1] = v0 * fci + v1 * fcr;
         }
         // values
         for (int i = 0; i < kv_dim; i += 2) {
+            int head_dim = i % head_size;
+            float freq = (float) (1.0f / Math.pow(10000.0f, head_dim / (float)head_size));
+            float val = pos * freq;
+            float fcr = (float) Math.cos(val);
+            float fci = (float) Math.sin(val);
             float v0 = k[i];
             float v1 = k[i + 1];
-            int freq_cis_imag_index = freq_cis_imag_row + (i % head_size) / 2;
-            float fcr = freq_cis_real[freq_cis_imag_index];
-            float fci = freq_cis_imag[freq_cis_imag_index];
             k[i] = v0 * fcr - v1 * fci;
             k[i + 1] = v0 * fci + v1 * fcr;
         }
     }
 
-    public void test(float[] q, float[] k, float[] freq_cis_real, float[] freq_cis_imag,
-                     int dim, int kv_dim, int head_size, int freq_cis_imag_row) {
+    public void test(float[] q, float[] k, int pos, int dim, int kv_dim, int head_size) {
         float[] copyOfQ = Arrays.copyOf(q, q.length);
         float[] copyOfK = Arrays.copyOf(k, k.length);
         Pointer pq = cuda.allocateAndCopyToDevice(TEST_STREAM, q, false);
         Pointer pk = cuda.allocateAndCopyToDevice(TEST_STREAM, k, false);
-        Pointer pFreq_cis_real = cuda.allocateAndCopyToDevice(TEST_STREAM, freq_cis_real, false);
-        Pointer pFreq_cis_imag = cuda.allocateAndCopyToDevice(TEST_STREAM, freq_cis_imag, false);
         cuda.synchronizeStream(TEST_STREAM);
-        call(TEST_STREAM, pq, pk, pFreq_cis_real, pFreq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
+        call(TEST_STREAM, pq, pk, pos, dim, kv_dim, head_size);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.copyFromDeviceToHost(TEST_STREAM, pk, k.length, k);
         cuda.copyFromDeviceToHost(TEST_STREAM, pq, q.length, q);
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pq);
         cuda.free(pk);
-        cuda.free(pFreq_cis_real);
-        cuda.free(pFreq_cis_imag);
 
-        call(copyOfQ, copyOfK, freq_cis_real, freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
+        call(copyOfQ, copyOfK, pos, dim, kv_dim, head_size);
 
         compareWithThreshold("ApplyRope.call q", q, copyOfQ, 1e-5f);
         compareWithThreshold("ApplyRope.call k", k, copyOfK, 1e-5f);
     }
 
-    public void call(int streamId, Pointer q, Pointer k, Pointer freq_cis_real, Pointer freq_cis_imag,
-                     int dim, int kv_dim, int head_size, int freq_cis_imag_row) {
-//        __global__ void applyRope(float *q, float *k,
-//                                  const float *freq_cis_real, const float *freq_cis_imag,
-//                                  int dim, int kv_dim, int head_size, int freq_cis_imag_row)
+    public void call(int streamId, Pointer q, Pointer k, int pos, int dim, int kv_dim, int head_size) {
+//        __global__ void applyRope(float *q, float *k, int pos, int dim, int kv_dim, int head_size)
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(q),
                 Pointer.to(k),
-                Pointer.to(freq_cis_real),
-                Pointer.to(freq_cis_imag),
+                Pointer.to(new int[]{pos}),
                 Pointer.to(new int[]{dim}),
                 Pointer.to(new int[]{kv_dim}),
-                Pointer.to(new int[]{head_size}),
-                Pointer.to(new int[]{freq_cis_imag_row})
+                Pointer.to(new int[]{head_size})
         );
 
         // choose larger dimension
@@ -109,9 +102,7 @@ public class ApplyRope extends Kernel {
         String code =
                 """
                             extern "C"
-                            __global__ void applyRope(float *q, float *k,
-                            const float *freq_cis_real, const float *freq_cis_imag,
-                            int dim, int kv_dim, int head_size, int freq_cis_imag_row)
+                            __global__ void applyRope(float *q, float *k, int pos, int dim, int kv_dim, int head_size)
                             {
                                 // process elements in steps of 2
                                 int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -120,9 +111,11 @@ public class ApplyRope extends Kernel {
                                     return;
                                 }
 
-                                int freq_cis_imag_index = freq_cis_imag_row + (i % head_size) / 2;
-                                float fcr = freq_cis_real[freq_cis_imag_index];
-                                float fci = freq_cis_imag[freq_cis_imag_index];
+                                int head_dim = i % head_size;
+                                float freq = (float) (1.0f / powf(10000.0f, head_dim / (float)head_size));
+                                float val = pos * freq;
+                                float fcr = (float) cosf(val);
+                                float fci = (float) sinf(val);
 
                                 // Ensure we don't go out of bounds
                                 if (i < dim - 1) {

@@ -93,7 +93,7 @@ public class Run {
             MatMul.callI8(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
-            ApplyRope.call(s.q, s.k, w.freq_cis_real, w.freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
+            ApplyRope.call(s.q, s.k, pos, dim, kv_dim, head_size);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
@@ -228,7 +228,7 @@ public class Run {
             cuda.matMul.testI8(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
-            cuda.applyRope.test(s.q, s.k, w.freq_cis_real, w.freq_cis_imag, dim, kv_dim, head_size, freq_cis_imag_row);
+            cuda.applyRope.test(s.q, s.k, pos, dim, kv_dim, head_size);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
@@ -441,8 +441,7 @@ public class Run {
 //            cuda.synchronizeStream(2);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
-            cuda.applyRope.call(0, qCU, kCU, freq_cis_realCU, freq_cis_imagCU,
-                    dim, kv_dim, head_size, freq_cis_imag_row);
+            cuda.applyRope.call(0, qCU, kCU, pos, dim, kv_dim, head_size);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
@@ -633,7 +632,7 @@ public class Run {
 
             context = new Context(layerAllocation);
 
-            w = new TransformerWeights(context, reader, MODELS_DIRECTORY, p, quant, shared_weights);
+            w = new TransformerWeights(context, reader, p, quant, shared_weights);
         } catch (IOException e) {
             throw new RuntimeException("Initialization caused unexpected", e);
         }
