@@ -51,8 +51,7 @@ public class TransformerWeights {
         }
     }
 
-    public TransformerWeights(Context c, BinFileReader reader, String modelDirectory, Config p, Quant quant,
-                              boolean sharedWeights)
+    public TransformerWeights(Context c, BinFileReader reader, Config p, Quant quant, boolean sharedWeights)
             throws IOException {
         this.quant = quant;
         // token embedding table
