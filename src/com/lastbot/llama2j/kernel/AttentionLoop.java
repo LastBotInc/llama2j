@@ -12,7 +12,7 @@ import java.util.Arrays;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class AttentionLoop extends Kernel {
-    public static final int BLOCK_SIZE = 64;
+    public static final int BLOCK_SIZE = 32;
 
     private final CUfunction kernel;
 
@@ -80,7 +80,7 @@ public class AttentionLoop extends Kernel {
                      int attentionIndex, int keybase, int kv_dim, int queryIndex, int pos, int head_size) {
         CUstream stream = cuda.getCUKernelStream(streamId);
         int size = pos + 1;
-        int blockSizeX = findNextPowerOf2(size);
+        int blockSizeX = BLOCK_SIZE;
         int gridSizeX = (int) Math.ceil((double) size / blockSizeX);
 
 //        __global__ void attentionLoop(float* q, float* l_key_cache, float* att, float* max,
@@ -136,11 +136,14 @@ public class AttentionLoop extends Kernel {
                                         // get the key vector for this head and at this timestep
                                         // calculate the attention score as the dot product of q and k
                                         int keyIndex = keybase + t * kv_dim;
-                                        float value;
                                         float score = 0.0f;
                                         float headMax = -FLT_MAX;
+                                        float value;
+                                        float* keyPointer = (&(l_key_cache[keyIndex]));
+
+                                        #pragma unroll 16
                                         for (int i = 0; i < head_size; i++) {
-                                            value = q[i] * l_key_cache[keyIndex + i];
+                                            value = q[i] * keyPointer[i];
                                             score += value;
                                             headMax = fmaxf(headMax, value);
                                         }
