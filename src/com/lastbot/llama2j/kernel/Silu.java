@@ -1,6 +1,7 @@
 package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
+import com.lastbot.llama2j.LLogger;
 import jcuda.Pointer;
 import jcuda.driver.CUfunction;
 
@@ -10,6 +11,7 @@ import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class Silu extends Kernel {
     public static final int BLOCK_SIZE = 64;
+    public static final boolean LOOKUP_EXP = true;
 
     private final ContextCUDA cuda;
     private final CUfunction kernel;
@@ -32,10 +34,45 @@ public class Silu extends Kernel {
         this.kernel = create();
     }
 
+    private static final int MAX_LOOK_UP_ABS_VALUE = 5;
+    private static final int TABLE_SIZE = 8192;
+    private static final int LOOP_UP_MULTIPLIER = (TABLE_SIZE / (2 * MAX_LOOK_UP_ABS_VALUE));
+    private static final float[] expTable = new float[TABLE_SIZE];
+    private static boolean isInitialized = false;
+
+    public static void init() {
+        Thread.ofVirtual().start(() ->
+        {
+            for (int i = 0; i < TABLE_SIZE; i++) {
+                // Assuming MAX_LOOK_UP_ABS_VALUE <= hb[i] <= MAX_LOOK_UP_ABS_VALUE
+                double val = (i / (double) TABLE_SIZE) * (2.0 * MAX_LOOK_UP_ABS_VALUE) - MAX_LOOK_UP_ABS_VALUE;
+                expTable[i] = (float) (1.0f / (1.0f + Math.exp((-val))));
+            }
+            isInitialized = true;
+            LLogger.info("Silu exp() lookup created");
+        });
+    }
+
+    public static float lookupExp(float val) {
+        if (LOOKUP_EXP && isInitialized) {
+            float position = ((val + MAX_LOOK_UP_ABS_VALUE) * LOOP_UP_MULTIPLIER);
+            int index = (int) position;
+            if (position > 0 && position < TABLE_SIZE - 1) {
+                float valueAtLowerIndex = expTable[index];
+                return valueAtLowerIndex + (position - index) * (expTable[index + 1] - valueAtLowerIndex);
+            }
+        }
+        return (float) (1.0f / (1.0f + Math.exp((-val))));
+    }
+
     public static void call(float[] hb, float[] hb2, int hidden_dim) {
         for (int i = 0; i < hidden_dim; i++) {
-            hb[i] *= (float) (1.0f / (1.0f + Math.exp((-hb[i])))) * hb2[i];
+            hb[i] *= lookupExp(hb[i]) * hb2[i];
         }
+        // orig
+//        for (int i = 0; i < hidden_dim; i++) {
+//            hb[i] *= (float) (1.0f / (1.0f + Math.exp((-hb[i])))) * hb2[i];
+//        }
     }
 
     public void test(float[] hb, float[] hb2, int hidden_dim) {
