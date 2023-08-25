@@ -1,6 +1,7 @@
 package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
+import com.lastbot.llama2j.LLogger;
 import jcuda.Pointer;
 import jcuda.driver.CUfunction;
 
@@ -20,29 +21,64 @@ public class ApplyRope extends Kernel {
         this.kernel = create();
     }
 
+    private static float[] cosCache = null;
+    private static float[] sinCache = null;
+
+    public static void init(int dim, int head_size, int seqLen) {
+        Thread.ofVirtual().start(() -> {
+            if (cosCache != null) {
+                return;
+            }
+            int cacheSize = (dim / 2) * seqLen;
+            cosCache = new float[cacheSize];
+            sinCache = new float[cacheSize];
+
+            int i;
+            int pos;
+            float val;
+            int index;
+            for (i = 0; i < dim; i += 2) {
+                int head_dim = i % head_size;
+                float freq = (float) (1.0f / Math.pow(10000.0f, head_dim / (float) head_size));
+                for (pos = 0; pos < seqLen; pos++) {
+                    val = pos * freq;
+                    index = (pos * dim / 2) + i / 2;
+                    cosCache[index] = (float) Math.cos(val);
+                    sinCache[index] = (float) Math.sin(val);
+                }
+            }
+            LLogger.info("Rope cache initialized with  " + String.format("%,d", cacheSize) + " values");
+        });
+    }
+
     public static void call(float[] q, float[] k, int pos, int dim, int kv_dim, int head_size) {
+        // if not initialized, accessing cache will throw an exception
+
         // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
+        int i;
+        int index;
+        float fcr;
+        float fci;
+        float v0;
+        float v1;
+
         // keys
-        for (int i = 0; i < dim; i += 2) {
-            int head_dim = i % head_size;
-            float freq = (float) (1.0f / Math.pow(10000.0f, head_dim / (float)head_size));
-            float val = pos * freq;
-            float fcr = (float) Math.cos(val);
-            float fci = (float) Math.sin(val);
-            float v0 = q[i];
-            float v1 = q[i + 1];
+        for (i = 0; i < dim; i += 2) {
+            index = (pos * dim / 2) + i / 2;
+            fcr = cosCache[index];
+            fci = sinCache[index];
+            v0 = q[i];
+            v1 = q[i + 1];
             q[i] = v0 * fcr - v1 * fci;
             q[i + 1] = v0 * fci + v1 * fcr;
         }
         // values
-        for (int i = 0; i < kv_dim; i += 2) {
-            int head_dim = i % head_size;
-            float freq = (float) (1.0f / Math.pow(10000.0f, head_dim / (float)head_size));
-            float val = pos * freq;
-            float fcr = (float) Math.cos(val);
-            float fci = (float) Math.sin(val);
-            float v0 = k[i];
-            float v1 = k[i + 1];
+        for (i = 0; i < kv_dim; i += 2) {
+            index = (pos * dim / 2) + i / 2;
+            fcr = cosCache[index];
+            fci = sinCache[index];
+            v0 = k[i];
+            v1 = k[i + 1];
             k[i] = v0 * fcr - v1 * fci;
             k[i + 1] = v0 * fci + v1 * fcr;
         }
