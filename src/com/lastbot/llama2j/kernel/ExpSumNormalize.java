@@ -85,19 +85,20 @@ public class ExpSumNormalize extends Kernel {
 
                             int itemsPerThread = size / blockDim.x + 1;
                             int start = threadIdx.x * itemsPerThread;
-                            int end = start + itemsPerThread;
+                            int end = min(start + itemsPerThread, size);
+                            
+                            float* xPointer = x + index;
 
                             float max_val = maxValue[maxIndex];
 
                             float value;
                             float localSum = 0.0f;
+                            #pragma unroll 2
                             for (int i = start; i < end; i++) {
-                                if (i < size) {
-                                    value = expf(x[index + i] - max_val);
+                                value = expf(xPointer[i] - max_val);
 
-                                    x[index + i] = value;
-                                    localSum += value;
-                                }
+                                xPointer[i] = value;
+                                localSum += value;
                             }
                             
                             // Store the localSum in shared memory for reduction
@@ -115,11 +116,10 @@ public class ExpSumNormalize extends Kernel {
 
                             float finalSum = sdata[0];
 
-                            for (int i = start; i < end; i++) {
-                                if (i < size) {
-                                    if (finalSum != 0.0f) {
-                                        x[index + i] /= finalSum;
-                                    }
+                            if (finalSum != 0.0f) {
+                                #pragma unroll 4
+                                for (int i = start; i < end; i++) {
+                                    xPointer[i]  /= finalSum;
                                 }
                             }
                         }
