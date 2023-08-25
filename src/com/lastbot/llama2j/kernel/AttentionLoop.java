@@ -114,7 +114,7 @@ public class AttentionLoop extends Kernel {
                 """
                             #include <cfloat>
 
-                            __device__ float atomicMax(float* address, float value) {
+                            __device__ __forceinline__ float atomicMax(float* address, float value) {
                                 float old = *address, assumed;
                                 do {
                                     assumed = old;

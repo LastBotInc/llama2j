@@ -125,7 +125,7 @@ public class FindMax extends Kernel {
 
                          #define BLOCK_SIZE <BLOCK_SIZE>
 
-                        __device__ void atomicMaxf(float* address, float val) {
+                        __device__ __forceinline__ void atomicMaxf(float* address, float val) {
                               int* address_as_int = (int*)address;
                               int old = *address_as_int, assumed;
                               while (val > __int_as_float(old)) {
