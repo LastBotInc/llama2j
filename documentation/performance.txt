@@ -127,7 +127,80 @@ achieved tok/s: 5.22
 SumOfSquares BLOCK_SIZE = 256;
 achieved tok/s: 5.57
 
-Calculational rope
+Optimize MatMul
+achieved tok/s: 8.97
+
+Further Optimize MatMul
+achieved tok/s: 9.17
+
+Optimize groupPayloadBase
+achieved tok/s: 8.78
+-> revert
+
+without static cast
+8.97
+
+eliminate groupPayloadBase
+achieved tok/s: 9.17
+
+End condition to loop
+achieved tok/s: 11.77
+
+achieved tok/s: 11.71
+
+loop start and end
+achieved tok/s: 12.83, 12.84, 12.81
+
+Union byte to float conversion
+achieved tok/s: 12.83
+
+#pragma unroll 48
+achieved tok/s: 13.12
+
+#pragma unroll 24
+achieved tok/s: 13.08
+
+#pragma unroll 32
+achieved tok/s: 13.26
+
+#pragma unroll 16
+achieved tok/s: 13.20
+
+#pragma unroll 8
+achieved tok/s: 12.55
+
+
+#pragma unroll 32
+BLOCK_SIZE = 64;
+achieved tok/s: 13.26
+
+BLOCK_SIZE = 32;
+achieved tok/s: 14.30
+
+BLOCK_SIZE = 16;
+achieved tok/s: 15.38
+
+BLOCK_SIZE = 8;
+achieved tok/s: 16.06
+
+BLOCK_SIZE = 4;
+achieved tok/s: 16.29
+
+BLOCK_SIZE = 2;
+achieved tok/s: 14.68
+
+BLOCK_SIZE = 1;
+achieved tok/s: 9.05
+
+BLOCK_SIZE = 128;
+achieved tok/s:11.95
+
+BLOCK_SIZE = 256;
+achieved tok/s:
+
+MatMul BLOCK_SIZE = 4;
+achieved tok/s: 16.32
+
 
 
 
