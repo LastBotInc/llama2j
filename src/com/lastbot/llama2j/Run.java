@@ -412,7 +412,6 @@ public class Run {
 
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
 
-//            log(pos, "tmp1CU", cuda, tmp1CU, 1);
             cuda.weightNormalizeAndScale.callI8(
                     0, xbCU, xCU, l_rms_att_weightCU, l * dim, tmp1CU, dim);
 
@@ -433,11 +432,9 @@ public class Run {
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
 
-//            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
             cuda.copyFloatsFromDeviceToDevice(1, kCU, 0,
                     l_key_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
 
-//            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
             cuda.copyFloatsFromDeviceToDevice(0, vCU, 0,
                     l_value_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
 
@@ -460,12 +457,8 @@ public class Run {
                 int maxIndex = h;
 
                 // tmp1CU collects max values per head, and is used in ExpSumNormalize below
-//                cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU, tmp1CU, maxIndex,
-//                        attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
                 cuda.attentionLoop.call(streamId, qCU, l_key_cacheCU.pointer(), attCU, tmp1CU, maxIndex,
                         attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
-
-//                cuda.findMax.call(streamId, tmp1CU, maxIndex, attCU, attentionIndex, pos + 1);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
