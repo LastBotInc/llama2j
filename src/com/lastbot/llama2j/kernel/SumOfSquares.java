@@ -82,15 +82,12 @@ public class SumOfSquares extends Kernel {
 
                                     int itemsPerThread = size / blockDim.x + 1;
                                     int start = threadIdx.x * itemsPerThread;
-                                    int end = start + itemsPerThread;
+                                    int end = fminf(start + itemsPerThread, size);
 
-                                    float value;
                                     float localSum = 0.0f;
+                                    #pragma unroll 8
                                     for (int i = start; i < end; i++) {
-                                        if (i < size) {
-                                            value = x[i] * x[i];
-                                            localSum += value;
-                                        }
+                                        localSum += x[i] * x[i];
                                     }
                                     
                                     // Store the localSum in shared memory for reduction
