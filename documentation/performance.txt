@@ -103,10 +103,38 @@ achieved tok/s: 5.49
 combine normalize to ExpSum
 achieved tok/s: 5.49
 
-achieved tok/s: 5.67
+- updated all
+ExpSumNormalize BLOCK_SIZE = 16;
+achieved tok/s: 5.49
 
-- updated
-achieved tok/s: 5.09
+remove unnecessary syncthreads
+SumOfSquares BLOCK_SIZE = 16;
+achieved tok/s: 5.48
+
+SumOfSquares BLOCK_SIZE = 128;
+achieved tok/s: 5.54
+
+SumOfSquares BLOCK_SIZE = 1024;
+achieved tok/s: 5.54
+
+SumOfSquares BLOCK_SIZE = 256;
+achieved tok/s: 5.54
+
+Attention parallel
+achieved tok/s: 5.22
+
+// non-parallel
+SumOfSquares BLOCK_SIZE = 256;
+achieved tok/s: 5.57
+
+Calculational rope
+
+
+
+----- CPU----- CPU----- CPU----- CPU
+
+dynamic threadcount
+achieved tok/s: 5.25
 
 ---------------- llama2j ----------------
 CUDA llama2_7b.bin 2 GPU
