@@ -12,7 +12,7 @@ import java.util.concurrent.CountDownLatch;
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class MatMul extends Kernel {
-    public static final int BLOCK_SIZE = 64;
+    public static final int BLOCK_SIZE = 4;
     public static final int TARGET_THREAD_COUNT = 8 * Runtime.getRuntime().availableProcessors();
 
     private final CUfunction kernelFP32;
@@ -206,8 +206,8 @@ public class MatMul extends Kernel {
                     int group;
                     int j;
 
-                    int jj;
-                    int startFloatIndex;
+                    int startJ;
+                    int endJ;
 
                     for (i = start; i < end; i++) {
                         weightPos = weightIndex + i * n;
@@ -221,14 +221,12 @@ public class MatMul extends Kernel {
                         for (group = startGroupIndex; group <= endGroupIndex; group++) {
                             min = bytesToFloat(encoded, groupPayloadBase - 8);
                             max = bytesToFloat(encoded, groupPayloadBase - 4);
-                            rangeMultiplier = (max - min) / 255f;
+                            rangeMultiplier = (max - min) / 255.0f;
 
-                            startFloatIndex = group * groupSize;
-                            for (j = 0; j < groupSize; j++) {
-                                jj = startFloatIndex + j;
-                                if (jj >= weightPos && jj < weightPos + n) {
-                                    val += ((encoded[groupPayloadBase + j] & 0xff) * rangeMultiplier + min) * x[index++];
-                                }
+                            startJ = group * groupSize < weightPos ? weightPos - group * groupSize : 0;
+                            endJ = Math.min(groupSize, weightPos + n - (group * groupSize));
+                            for (j = startJ; j < endJ; j += 2) {
+                                val += ((encoded[groupPayloadBase + j] & 0xff) * rangeMultiplier + min) * x[index++];
                             }
                             groupPayloadBase += bytesPerGroup;
                         }
@@ -331,7 +329,7 @@ public class MatMul extends Kernel {
 
     public void callFP32(int streamId, Pointer xout, Pointer x, Pointer w, int n, int d) {
         CUstream stream = cuda.getCUKernelStream(streamId);
-        int blockSizeX = Math.min(findNextPowerOf2(d), BLOCK_SIZE);
+        int blockSizeX = BLOCK_SIZE;
         int gridSizeX = (int) Math.ceil((double) d / blockSizeX);
 
 //        __global__ void matMul(float* xout, float* x, float* w, int n, int d) {
@@ -373,7 +371,7 @@ public class MatMul extends Kernel {
         int bytesPerGroup = q.encodedBytesPerGroup();
         int groupSize = q.groupSize();
 
-        int blockSizeX = Math.min(findNextPowerOf2(d), BLOCK_SIZE);
+        int blockSizeX = BLOCK_SIZE;
         int gridSizeX = (int) Math.ceil((double) d / blockSizeX);
 
 //        __global__ void matMul(float* xout, float* x, float* encoded, int weightIndex,
@@ -403,6 +401,18 @@ public class MatMul extends Kernel {
     private CUfunction createI8() {
         String code =
                 """
+                            struct four_bytes {
+                                unsigned char b0;
+                                unsigned char b1;
+                                unsigned char b2;
+                                unsigned char b3;
+                            };
+
+                            union __align__(4) float_int_union {
+                                four_bytes bytes;
+                                int intVal;
+                            };
+
                         extern "C"
                           __global__  void matMulI8(float* xout, float* x, unsigned char* encoded, int weightIndex,
                                                    int groupSize, int bytesPerGroup, int n, int d ) {
@@ -417,15 +427,20 @@ public class MatMul extends Kernel {
                             
                                     float min;
                                     float max;
-                                    float range;
+                                    float rangeMultiplier;
                                     int groupBase;
-                                    int groupPayloadBase;
-                                    int jj;
+                                    unsigned char* groupPayload;
+                                    int j;
+                                    
+                                    float_int_union converter;
+
+                                    int start;
+                                    int end;
+                                    
+                                    unsigned char* groupEncoded;
                             
                                     int index = 0;
                                     float val;
-                            
-                                    int startFloatIndex;
 
                                     weightPos = weightIndex + i * n;
                                     val = 0.0f;
@@ -435,32 +450,31 @@ public class MatMul extends Kernel {
 
                                     for (int group = startGroupIndex; group <= endGroupIndex; group++) {
                                         groupBase = group * bytesPerGroup;
-                                        groupPayloadBase = groupBase + 8;
-                                        
-                                        min = __int_as_float((encoded[groupBase + 3] & 0xFF)
-                                                    | ((encoded[groupBase + 2] & 0xFF) << 8)
-                                                    | ((encoded[groupBase + 1] & 0xFF) << 16)
-                                                    | ((encoded[groupBase] & 0xFF) << 24));
+                                        groupEncoded = encoded + groupBase;
+                                        groupPayload = groupEncoded + 8;
 
-                                        max = __int_as_float((encoded[groupBase + 7] & 0xFF)
-                                                    | ((encoded[groupBase + 6] & 0xFF) << 8)
-                                                    | ((encoded[groupBase + 5] & 0xFF) << 16)
-                                                    | ((encoded[groupBase + 4] & 0xFF) << 24));
+                                        converter.bytes.b0 = groupEncoded[3];
+                                        converter.bytes.b1 = groupEncoded[2];
+                                        converter.bytes.b2 = groupEncoded[1];
+                                        converter.bytes.b3 = groupEncoded[0];
 
-                                        range = max - min;
+                                        min = __int_as_float(converter.intVal);
 
-                                        startFloatIndex = group * groupSize;
-                                        for (int j = 0; j < groupSize; j++) {
-                                            jj = startFloatIndex + j;
-                                            if (jj >= weightPos + n) {
-                                                break;
-                                            }
-                                            if (jj >= weightPos) {
-                                                float byteValue = static_cast<float>(encoded[groupPayloadBase + j]);
-                                                float value = (byteValue * range / 255.0f) + min;
+                                        converter.bytes.b0 = groupEncoded[7];
+                                        converter.bytes.b1 = groupEncoded[6];
+                                        converter.bytes.b2 = groupEncoded[5];
+                                        converter.bytes.b3 = groupEncoded[4];
 
-                                                val += value * x[index++];
-                                            }
+                                        max = __int_as_float(converter.intVal);
+
+                                        rangeMultiplier = (max - min) / 255.0f;
+
+                                        start = group * groupSize < weightPos ? weightPos - group * groupSize: 0;
+                                        end = groupSize <= weightPos + n - (group * groupSize) ?
+                                                groupSize : weightPos + n - (group * groupSize);
+                                        #pragma unroll 32
+                                        for (j = start; j < end; j++) {
+                                                val += (groupPayload[j] * rangeMultiplier + min) * x[index++];
                                         }
                                     }
                                     xout[i] = val;
