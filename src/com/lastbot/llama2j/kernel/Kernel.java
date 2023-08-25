@@ -41,24 +41,7 @@ public abstract class Kernel {
 
     protected final int TEST_STREAM = ContextCUDA.TEST_STREAM;
 
-    private final Map<KernelSize, CUfunction> functionByKernelSizeMap = new HashMap<>();
-
     protected static CUfunction defaultFunction;
-
-    public record KernelSize(int[] size) {
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) return true;
-            if (o == null || getClass() != o.getClass()) return false;
-            KernelSize that = (KernelSize) o;
-            return Arrays.equals(size, that.size);
-        }
-
-        @Override
-        public int hashCode() {
-            return Arrays.hashCode(size);
-        }
-    }
 
     protected Kernel(ContextCUDA cuda, String name) {
         this.cuda = cuda;
@@ -138,6 +121,7 @@ public abstract class Kernel {
                 NVCC_PATH,
                 "-arch=" + CUDA_ARCHITECTURE,
                 "-code=" + CUDA_CODE,
+                "--use_fast_math",
                 "-cubin",
                 cuFileName,
                 "-o",
