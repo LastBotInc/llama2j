@@ -117,7 +117,7 @@ public class Silu extends Kernel {
         String code =
                 """
                             extern "C"
-                            __global__ void accum(float *hb, float *hb2, int hidden_dim)
+                            __global__ void silu(float *hb, float *hb2, int hidden_dim)
                             {
                                 int i = blockIdx.x * blockDim.x + threadIdx.x;
                                 if (i < hidden_dim) {
@@ -129,6 +129,6 @@ public class Silu extends Kernel {
                                 }
                             }
                         """;
-        return loadFromCode(code, "accum");
+        return loadFromCode(code, "silu");
     }
 }
