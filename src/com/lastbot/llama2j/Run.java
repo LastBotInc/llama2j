@@ -611,6 +611,12 @@ public class Run {
             boolean shared_weights = p.vocab_size > 0;
             p.vocab_size = abs(p.vocab_size);
 
+            Silu.init();
+
+            final int dim = p.dim;
+            final int head_size = dim / p.n_heads;
+            ApplyRope.init(p.dim, head_size, p.seq_len);
+
             LLogger.info(p.toString());
 
             layerAllocation = new LayerAllocation(commandLine.getGpuMem(), p, mode, quant, shared_weights);
