@@ -232,9 +232,297 @@ h % 16;
 achieved tok/s: 17.80, 17.66
 
 parallelize self.w1(x)), self.w3(x)
+achieved tok/s: 17.88, 17.86, 17.72, 17.59
+
+accumWeightedValue, #pragma unroll 64
+achieved tok/s: 17.80
+
+accumWeightedValue, #pragma unroll 32
+achieved tok/s: 17.67
+
+accumWeightedValue, #pragma unroll 16
+achieved tok/s: 17.82
+
+accumWeightedValue, #pragma unroll 8
+achieved tok/s:17.86, 17.79
+
+accumWeightedValue, #pragma unroll 4
+achieved tok/s:17.72
+
+accumWeightedValue optimization
+#pragma unroll 8
 achieved tok/s: 17.84
 
+#pragma unroll 4
+achieved tok/s: 17.81
 
+#pragma unroll 16
+achieved tok/s: 17.84
+
+AccumWeightedValue
+BLOCK_SIZE = 64;
+achieved tok/s: 17.84, 17/81
+
+BLOCK_SIZE = 32;
+achieved tok/s: 17.74
+
+BLOCK_SIZE = 16;
+achieved tok/s: 17.73
+
+BLOCK_SIZE = 128;
+achieved tok/s: 17.84, 17.78
+
+
+BLOCK_SIZE = 256;
+achieved tok/s: 17.82
+
+BLOCK_SIZE = 64;
+17.81
+
+AttentionLoop, optimize
+achieved tok/s: 17.86,17.76
+
+AttentionLoop
+#pragma unroll 16
+achieved tok/s: 17.87
+
+#pragma unroll 8
+achieved tok/s: 17.78
+
+#pragma unroll 4
+achieved tok/s: 17.71
+
+#pragma unroll 2
+achieved tok/s: 17.84
+
+#pragma unroll 32
+
+AttentionLoop
+BLOCK_SIZE = dynamic;
+achieved tok/s: 17.87
+
+AttentionLoop
+
+BLOCK_SIZE = 1;
+achieved tok/s: 17.75
+
+BLOCK_SIZE = 2;
+achieved tok/s: 17.88, 17.78
+
+BLOCK_SIZE = 4;
+achieved tok/s: 17.86
+
+BLOCK_SIZE = 8;
+achieved tok/s: 17.82
+
+BLOCK_SIZE = 16;
+achieved tok/s: 17.81
+
+BLOCK_SIZE = 32;
+achieved tok/s: 17.87
+
+BLOCK_SIZE = 64;
+achieved tok/s: 17.85
+
+BLOCK_SIZE = 128;
+achieved tok/s: 17.76
+
+BLOCK_SIZE = 256;
+achieved tok/s: 17.74
+
+BLOCK_SIZE = 512;
+achieved tok/s: 17.73
+
+baseline
+
+
+SumOfSquares
+achieved tok/s: 17.70, 17.79,
+
+sumOfSquares loop optimization
+achieved tok/s: 17.83, 17.78
+
+#pragma unroll 32
+achieved tok/s: 17.71
+
+#pragma unroll 4
+achieved tok/s: 17.79
+
+#pragma unroll 2
+achieved tok/s: 17.86
+
+#pragma unroll 16
+achieved tok/s: 17.87
+
+#pragma unroll 8
+BLOCK_SIZE = 256;
+achieved tok/s: 17.85,
+
+BLOCK_SIZE = 32;
+achieved tok/s: 17.72
+
+BLOCK_SIZE = 128;
+achieved tok/s: 17.79
+
+BLOCK_SIZE = 512;
+achieved tok/s: 17.89, 17.83, 17.81
+
+BLOCK_SIZE = 1024;
+achieved tok/s:
+
+baseline 17.85
+
+optimize AccumWeightedValue
+achieved tok/s: 17.86
+
+--use_fast_math
+achieved tok/s: 18.48
+
+optimize AccumWeightedValue
+
+#pragma unroll 1
+achieved tok/s: 18.63
+
+#pragma unroll 4
+achieved tok/s: 18.63
+
+#pragma unroll 8
+achieved tok/s: 18.65
+
+#pragma unroll 16
+achieved tok/s: 18.68
+
+#pragma unroll 32
+achieved tok/s: 18.52
+
+#pragma unroll 64
+achieved tok/s: 18.51
+
+#pragma unroll
+achieved tok/s:
+
+#pragma unroll 2
+achieved tok/s: 18.67, 18.67
+
+final loop if
+achieved tok/s: 18.69
+
+#pragma unroll 1
+achieved tok/s: 18.70
+
+#pragma unroll 2
+achieved tok/s: 18.66
+
+#pragma unroll 4
+achieved tok/s: 18.69
+
+#pragma unroll 8
+achieved tok/s: 18.51
+
+#pragma unroll 16
+achieved tok/s: 18.67
+
+#pragma unroll 32
+
+expAndSumSmall, optim
+achieved tok/s: 18.70
+
+BLOCK_SIZE = 128;
+achieved tok/s: 18.70
+
+BLOCK_SIZE = 64;
+achieved tok/s: 18.69
+
+BLOCK_SIZE = 256;
+achieved tok/s: 18.48
+
+BLOCK_SIZE = 32;
+achieved tok/s: 18.68
+
+BLOCK_SIZE = 16;
+achieved tok/s:
+
+BLOCK_SIZE = 128;
+achieved tok/s: 18.70
+
+"--maxrregcount=" + "24",
+achieved tok/s: 17.08
+
+"--maxrregcount=" + "32",
+achieved tok/s: 17.48
+
+"--maxrregcount=" + "48",
+achieved tok/s: 18.73
+
+"--maxrregcount=" + "49",
+achieved tok/s: 19.35
+
+"--maxrregcount=" + "50",
+achieved tok/s: 19.60
+
+"--maxrregcount=" + "52",
+achieved tok/s: 19.54
+
+"--maxrregcount=" + "56",
+achieved tok/s: 19.36
+
+"--maxrregcount=" + "64",
+achieved tok/s: 19.52
+
+"--maxrregcount=" + "92",
+achieved tok/s: 19.37
+
+"--maxrregcount=" + "128",
+achieved tok/s: 19.27
+
+"--maxrregcount=" + "255",
+achieved tok/s: 19.39
+
+
+"--maxrregcount=" + "50",
+achieved tok/s: 19.58
+
+"--extra-device-vectorization",
+achieved tok/s: 19.64
+achieved tok/s: 19.60
+achieved tok/s: 19.63
+
+baseline
+achieved tok/s: 19.58
+
+
+achieved tok/s: 19.53
+achieved tok/s: 19.43
+
+
+"--ptxas-options=" + "-O3",
+"--ptxas-options=" + "--allow-expensive-optimizations=true",
+
+achieved tok/s: 19.45
+
+attentionloop force inline
+achieved tok/s: 19.40
+achieved tok/s: 19.57
+achieved tok/s: 19.58
+achieved tok/s: 19.59
+
+run heads in parallel
+achieved tok/s: 12.68
+
+int numberOfThreads = 1;
+achieved tok/s: 14.09
+
+int numberOfThreads = 2;
+achieved tok/s: 15.09
+
+int numberOfThreads = 4;
+achieved tok/s:
+
+int numberOfThreads = 8;
+achieved tok/s: 13.44
+
+int numberOfThreads = 32;
+achieved tok/s: 12.92
 
 ----- CPU----- CPU----- CPU----- CPU
 
