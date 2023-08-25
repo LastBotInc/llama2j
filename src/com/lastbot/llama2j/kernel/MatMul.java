@@ -13,7 +13,7 @@ import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
 public class MatMul extends Kernel {
     public static final int BLOCK_SIZE = 64;
-    public static final int THREAD_COUNT = 32;
+    public static final int TARGET_THREAD_COUNT = 8 * Runtime.getRuntime().availableProcessors();
 
     private final CUfunction kernelFP32;
     private final CUfunction kernelI8;
@@ -26,9 +26,14 @@ public class MatMul extends Kernel {
     }
 
     public static void callFP32(float[] xout, float[] x, float[] w, int weightIndex, int n, int d) {
-        int sizePerThread = d / THREAD_COUNT;
-        CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
-        for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
+        int threadCount = TARGET_THREAD_COUNT;
+        while (d % threadCount != 0) {
+            threadCount /= 2;
+        }
+
+        int sizePerThread = d / threadCount;
+        CountDownLatch latch = new CountDownLatch(threadCount);
+        for (int threadId = 0; threadId < threadCount; threadId++) {
             // W (d,n) @ x (n,) -> xout (d,)
             final int end = Math.min(d, (threadId + 1) * sizePerThread);
             int finalThreadId = threadId;
@@ -69,19 +74,34 @@ public class MatMul extends Kernel {
     }
 
     public static void callI8(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
+        Quant q = w.getQuant();
+        int groupSize = q.groupSize();
+        if (weightIndex % groupSize == 0 && n % groupSize == 0) {
+            callI8GroupAligns(xout, x, w, weightIndex, n, d);
+        } else {
+            callI8GroupDoesNotAlign(xout, x, w, weightIndex, n, d);
+        }
+    }
+
+    public static void callI8GroupAligns(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
         // W (d,n) @ x (n,) -> xout (d,)
+        int threadCount = TARGET_THREAD_COUNT;
+        while (d % threadCount != 0) {
+            threadCount /= 2;
+        }
+
         Quant q = w.getQuant();
 
         byte[] encoded = w.getByteArray();
 
-        int sizePerThread = d / THREAD_COUNT;
-        CountDownLatch latch = new CountDownLatch(THREAD_COUNT);
+        int sizePerThread = d / threadCount;
+        CountDownLatch latch = new CountDownLatch(threadCount);
 
         int bytesPerGroup = q.encodedBytesPerGroup();
 
         int groupSize = q.groupSize();
 
-        for (int threadId = 0; threadId < THREAD_COUNT; threadId++) {
+        for (int threadId = 0; threadId < threadCount; threadId++) {
             // W (d,n) @ x (n,) -> xout (d,)
             final int start = threadId * sizePerThread;
             final int end = Math.min(d, (threadId + 1) * sizePerThread);
@@ -94,17 +114,18 @@ public class MatMul extends Kernel {
 
                     float min;
                     float max;
-                    float range;
-                    int groupBase;
+                    float rangeMultiplier;
                     int groupPayloadBase;
-                    int jj;
 
                     int index;
                     float val;
 
-                    int startFloatIndex;
+                    int i;
+                    int group;
+                    int j;
+                    int limit;
 
-                    for (int i = start; i < end; i++) {
+                    for (i = start; i < end; i++) {
                         weightPos = weightIndex + i * n;
                         index = 0;
                         val = 0f;
@@ -112,22 +133,104 @@ public class MatMul extends Kernel {
                         startGroupIndex = weightPos / groupSize; // round down
                         endGroupIndex = (weightPos + n - 1) / groupSize;
 
-                        for (int group = startGroupIndex; group <= endGroupIndex; group++) {
-                            groupBase = group * bytesPerGroup;
-                            groupPayloadBase = groupBase + 8;
-                            min = bytesToFloat(encoded, groupBase);
-                            max = bytesToFloat(encoded, groupBase + 4);
-                            range = max - min;
+                        groupPayloadBase = startGroupIndex * bytesPerGroup + 8;
+                        for (group = startGroupIndex; group <= endGroupIndex; group++) {
+                            min = bytesToFloat(encoded, groupPayloadBase - 8);
+                            max = bytesToFloat(encoded, groupPayloadBase - 4);
+                            rangeMultiplier = (max - min) / 255f;
+
+                            limit = Math.min(weightPos + n - group * groupSize, groupSize);
+                            for (j = 0; j < limit; j++) {
+                                val += ((encoded[groupPayloadBase + j] & 0xff) * rangeMultiplier + min) * x[index++];
+                            }
+                            groupPayloadBase += bytesPerGroup;
+                        }
+
+                        if (index != n) {
+                            throw new RuntimeException("index != n");
+                        }
+                        xout[i] = val;
+                    }
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                } finally {
+                    latch.countDown();
+                }
+            });
+        }
+        try {
+            latch.await();
+        } catch (InterruptedException e) {
+            LLogger.error("callI8 was interrupted");
+        }
+    }
+
+    public static void callI8GroupDoesNotAlign(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
+        // W (d,n) @ x (n,) -> xout (d,)
+        int threadCount = TARGET_THREAD_COUNT;
+        while (d % threadCount != 0) {
+            threadCount /= 2;
+        }
+
+        Quant q = w.getQuant();
+
+        byte[] encoded = w.getByteArray();
+
+        int sizePerThread = d / threadCount;
+        CountDownLatch latch = new CountDownLatch(threadCount);
+
+        int bytesPerGroup = q.encodedBytesPerGroup();
+
+        int groupSize = q.groupSize();
+
+        for (int threadId = 0; threadId < threadCount; threadId++) {
+            // W (d,n) @ x (n,) -> xout (d,)
+            final int start = threadId * sizePerThread;
+            final int end = Math.min(d, (threadId + 1) * sizePerThread);
+            Thread.ofVirtual().start(() -> {
+                try {
+                    int weightPos;
+
+                    int startGroupIndex;
+                    int endGroupIndex;
+
+                    float min;
+                    float max;
+                    float rangeMultiplier;
+                    int groupPayloadBase;
+
+                    int index;
+                    float val;
+
+                    int i;
+                    int group;
+                    int j;
+
+                    int jj;
+                    int startFloatIndex;
+
+                    for (i = start; i < end; i++) {
+                        weightPos = weightIndex + i * n;
+                        index = 0;
+                        val = 0f;
+
+                        startGroupIndex = weightPos / groupSize; // round down
+                        endGroupIndex = (weightPos + n - 1) / groupSize;
+
+                        groupPayloadBase = startGroupIndex * bytesPerGroup + 8;
+                        for (group = startGroupIndex; group <= endGroupIndex; group++) {
+                            min = bytesToFloat(encoded, groupPayloadBase - 8);
+                            max = bytesToFloat(encoded, groupPayloadBase - 4);
+                            rangeMultiplier = (max - min) / 255f;
 
                             startFloatIndex = group * groupSize;
-                            for (int j = 0; j < groupSize; j++) {
+                            for (j = 0; j < groupSize; j++) {
                                 jj = startFloatIndex + j;
                                 if (jj >= weightPos && jj < weightPos + n) {
-                                    int byteValue = encoded[groupPayloadBase + j] & 0xff;
-                                    float value = byteValue / 255f * range + min;
-                                    val += value * x[index++];
+                                    val += ((encoded[groupPayloadBase + j] & 0xff) * rangeMultiplier + min) * x[index++];
                                 }
                             }
+                            groupPayloadBase += bytesPerGroup;
                         }
 
                         if (index != n) {
