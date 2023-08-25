@@ -145,16 +145,20 @@ public class AccumWeightedValue extends Kernel {
 
                                 if (i < head_size) {
                                     float sum = 0.0f;
-                                    int vIndex;
-                                    float a;
 
+                                    float* attPointer = att + attentionIndex;
+                                    float* valuePointer = &(l_value_cache[valueBase]) + i;
+
+                                    #pragma unroll 8
                                     for (int t = 0; t <= pos; t++) {
                                         // get the value vector for this head and at this timestep
-                                        vIndex = valueBase + t * kv_dim;
+                                        // = valueBase + t * kv_dim;
+                                        
                                         // get the attention weight for this timestep
-                                        a = att[attentionIndex + t];
+                                        // attPointer[t];
+
                                         // accumulate the weighted value into xb
-                                        sum += a * l_value_cache[vIndex + i];
+                                        sum += attPointer[t] * valuePointer[t * kv_dim];
                                     }
                                     xb[xbIndex + i] = sum;
                                 }
