@@ -416,29 +416,32 @@ public class Run {
             cuda.weightNormalizeAndScale.callI8(
                     0, xbCU, xCU, l_rms_att_weightCU, l * dim, tmp1CU, dim);
 
-//            cuda.synchronizeStream(0);
+            cuda.synchronizeStream(0);
 
             // qkv matmuls for this position
             cuda.matMul.callI8(0, qCU, xbCU, l_wqCU, l * dim * dim, dim, dim);
-            cuda.matMul.callI8(0, kCU, xbCU, l_wkCU, l * dim * kv_dim, dim, kv_dim);
-            cuda.matMul.callI8(0, vCU, xbCU, l_wvCU, l * dim * kv_dim, dim, kv_dim);
+            cuda.matMul.callI8(1, kCU, xbCU, l_wkCU, l * dim * kv_dim, dim, kv_dim);
+            cuda.matMul.callI8(2, vCU, xbCU, l_wvCU, l * dim * kv_dim, dim, kv_dim);
 
-//            cuda.synchronizeStream(1);
-//            cuda.synchronizeStream(2);
+            cuda.synchronizeStream(1);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
             cuda.applyRope.call(0, qCU, kCU, pos, dim, kv_dim, head_size);
+
+            cuda.synchronizeStream(2);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
 
 //            System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
-            cuda.copyFloatsFromDeviceToDevice(0, kCU, 0,
+            cuda.copyFloatsFromDeviceToDevice(1, kCU, 0,
                     l_key_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
 
 //            System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
             cuda.copyFloatsFromDeviceToDevice(0, vCU, 0,
                     l_value_cacheCU.withIndex(loff + pos * kv_dim), 0, kv_dim);
+
+            cuda.synchronizeStream(1);
 
             // multihead attention. iterate over all heads
             // CountDownLatch latch = new CountDownLatch(p.n_heads);
@@ -453,7 +456,7 @@ public class Run {
 
                 int keyBase = loff + (h / kv_mul) * head_size - Math.toIntExact(l_key_cacheCU.floatOffset());
 
-                int streamId = 0;
+                int streamId = h % ContextCUDA.STREAM_COUNT;
                 int maxIndex = h;
 
                 // tmp1CU collects max values per head, and is used in ExpSumNormalize below
@@ -478,6 +481,8 @@ public class Run {
                         valueBase, head_size, kv_dim, attentionIndex);
             }
 
+            cuda.synchronizeDevice();
+
             // final matmul to get the output of the attention
             cuda.matMul.callI8(0, xb2CU, xbCU, l_woCU, l * dim * dim, dim, dim);
             // residual connection back into x
@@ -486,13 +491,18 @@ public class Run {
             // ffn rmsnorm
 //            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
+            // todo zzz create AccumSumOfSquares that combines Accum and SumOfSquares
             cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
             cuda.weightNormalizeAndScale.callI8(0, xbCU, xCU, l_rms_ffn_weightCU, l * dim, tmp1CU, dim);
 
+            cuda.synchronizeStream(0);
+
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
             // first calculate self.w1(x) and self.w3(x)
-            cuda.matMul.callI8(0, hbCU, xbCU, l_w1CU, l * dim * hidden_dim, dim, hidden_dim);
+            cuda.matMul.callI8(1, hbCU, xbCU, l_w1CU, l * dim * hidden_dim, dim, hidden_dim);
             cuda.matMul.callI8(0, hb2CU, xbCU, l_w3CU, l * dim * hidden_dim, dim, hidden_dim);
+
+            cuda.synchronizeStream(1);
 
             cuda.silu.call(0, hbCU, hb2CU, hidden_dim);
 
