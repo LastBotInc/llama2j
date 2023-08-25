@@ -201,6 +201,38 @@ achieved tok/s:
 MatMul BLOCK_SIZE = 4;
 achieved tok/s: 16.32
 
+Parallelize qkv matmuls
+achieved tok/s: 16.63
+
+Parallelize qkv matmuls better
+achieved tok/s: 16.65
+
+Parallelize store kv cache
+achieved tok/s: 16.69
+
+Parallelize heads
+achieved tok/s: 17.75
+
+h % (ContextCUDA.STREAM_COUNT / 2);
+achieved tok/s: 17.77
+
+h % 8;
+achieved tok/s: 17.73
+
+h % 4;
+achieved tok/s: 17.73
+
+h % 2;
+achieved tok/s: 17.74
+
+h % 1;
+achieved tok/s: 17.74
+
+h % 16;
+achieved tok/s: 17.80, 17.66
+
+parallelize self.w1(x)), self.w3(x)
+achieved tok/s: 17.84
 
 
 
