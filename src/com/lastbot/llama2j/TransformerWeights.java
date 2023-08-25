@@ -139,9 +139,9 @@ public class TransformerWeights {
                 ContextCUDA cu = c.cudas[dev];
                 cu.synchronizeDevice();
             }
-            long t1 = System.currentTimeMillis();
-            LLogger.time("Created TransformerWeights", t0, t1);
         }
+        long t1 = System.currentTimeMillis();
+        LLogger.time("Created TransformerWeights", t0, t1);
     }
 
     public static long bytesStatic(Config config, boolean sharedWeights) {
