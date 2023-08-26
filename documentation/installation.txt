@@ -1,0 +1,11 @@
+sudo apt-get update
+sudo apt-get upgrade
+sudo apt-get install build-essential git cmake -y
+install newest nvidia driver from nvidia web page
+- if the installer warns about other installation method, ignore, just install
+install oracle jdk 20
+install intellij idea
+wget https://developer.download.nvidia.com/compute/cuda/12.0.0/local_installers/cuda_12.0.0_525.60.13_linux.run
+sudo sh cuda_12.0.0_525.60.13_linux.run
+- UNCHECK install drivers!
+- accept defaults & install
