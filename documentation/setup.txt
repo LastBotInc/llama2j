@@ -18,6 +18,3 @@ python3 export_meta_llama_bin.py  model/Llama-2-7b-chat/ llama2_7b.bin
 ls -l llama2_7b.bin
 E.g.
 -rw-rw-r-- 1 tero tero 26954711068 Jul 31 12:44 llama2_7b.bin
-
-sudo apt install clang libomp-dev
-
