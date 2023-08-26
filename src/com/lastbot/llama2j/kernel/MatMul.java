@@ -206,8 +206,8 @@ public class MatMul extends Kernel {
                     int group;
                     int j;
 
-                    int startJ;
-                    int endJ;
+                    int jj;
+                    int startFloatIndex;
 
                     for (i = start; i < end; i++) {
                         weightPos = weightIndex + i * n;
@@ -221,12 +221,14 @@ public class MatMul extends Kernel {
                         for (group = startGroupIndex; group <= endGroupIndex; group++) {
                             min = bytesToFloat(encoded, groupPayloadBase - 8);
                             max = bytesToFloat(encoded, groupPayloadBase - 4);
-                            rangeMultiplier = (max - min) / 255.0f;
+                            rangeMultiplier = (max - min) / 255f;
 
-                            startJ = group * groupSize < weightPos ? weightPos - group * groupSize : 0;
-                            endJ = Math.min(groupSize, weightPos + n - (group * groupSize));
-                            for (j = startJ; j < endJ; j += 2) {
-                                val += ((encoded[groupPayloadBase + j] & 0xff) * rangeMultiplier + min) * x[index++];
+                            startFloatIndex = group * groupSize;
+                            for (j = 0; j < groupSize; j++) {
+                                jj = startFloatIndex + j;
+                                if (jj >= weightPos && jj < weightPos + n) {
+                                    val += ((encoded[groupPayloadBase + j] & 0xff) * rangeMultiplier + min) * x[index++];
+                                }
                             }
                             groupPayloadBase += bytesPerGroup;
                         }
