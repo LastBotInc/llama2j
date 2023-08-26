@@ -4,7 +4,7 @@ huggingface-cli login
 # example, change model name, use https
 # note: do not download hf version
 # enter credentials if asked
-git clone https://hf.co:meta-llama/Llama-2-7b-chat
-
+git clone https://hf.co:/meta-llama/Llama-2-7b-chat
+pip install -r requirements.txt
 #export, first parameter is downloaded directory, second is the file to export to
-python export_meta_llama_bin.py ~/tmp/Llama-2-7b-chat ~/IdeaProjects/llama2j/models/Llama-2-7b-chat.bin
+python3 export.py --meta-llama ~/Downloads/Llama-2-7b-chat ~/IdeaProjects/llama2j/models/Llama-2-7b-chat.bin
