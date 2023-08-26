@@ -1,6 +1,11 @@
 sudo apt-get update
 sudo apt-get upgrade
-sudo apt-get install build-essential git cmake -y
+sudo apt-get install build-essential git cmake python3 clang libomp-dev git-lfs python3-pip -y
+git config --global credential.helper store
+sudo snap install emacs --classic
+pip install --upgrade huggingface_hub
+pip install transformers
+# make sure it is in your path
 install newest nvidia driver from nvidia web page
 - if the installer warns about other installation method, ignore, just install
 install oracle jdk 20
