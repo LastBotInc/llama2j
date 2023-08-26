@@ -1,12 +1,12 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="CPU llama2_7b.bin" type="Application" factoryName="Application">
+  <configuration default="false" name="CPU Llama-2-7b-chat.bin" type="Application" factoryName="Application">
     <envs>
       <env name="CUDA_HOME" value="/usr/local/cuda/" />
       <env name="CUDA_DEVICE_MAX_CONNECTIONS" value="16" />
     </envs>
     <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
     <module name="llama2j" />
-    <option name="PROGRAM_PARAMETERS" value="--mode CPU --checkpoint llama2_7b.bin" />
+    <option name="PROGRAM_PARAMETERS" value="--mode CPU --checkpoint Llama-2-7b-chat.bin" />
     <option name="VM_PARAMETERS" value="-Xmx127g -XX:+UseZGC -XX:+UseUnalignedLoadStores -XX:+UseXMMForArrayCopy -XX:+UseXMMForObjInit -XX:+UseFPUForSpilling -XX:-UseFastStosb" />
     <method v="2">
       <option name="Make" enabled="true" />
