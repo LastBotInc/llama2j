@@ -505,6 +505,7 @@ achieved tok/s: 19.40
 achieved tok/s: 19.57
 achieved tok/s: 19.58
 achieved tok/s: 19.59
+achieved tok/s: 19.70
 
 ----- CPU----- CPU----- CPU----- CPU
 
@@ -522,14 +523,21 @@ IntStream.range() for matmul
 TARGET_THREAD_COUNT = 8 * Runtime.getRuntime().availableProcessors();
 achieved tok/s: 6.15
 
-
 TARGET_THREAD_COUNT = 4 * Runtime.getRuntime().availableProcessors();
 achieved tok/s: 6.39
 
 remove latch
 achieved tok/s: 6.43, 6.33, 6.48
 
+No threadcount:
+achieved tok/s: 6.50
 
+Run-loop to IntStream
+achieved tok/s: 6.46, 6.45, 6.45
+
+- BEST
+
+achieved tok/s: 6.47
 
 ---------------- llama2.c ----------------
 #make runomp
