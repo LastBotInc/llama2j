@@ -6,7 +6,7 @@ import jcuda.Pointer;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.concurrent.CountDownLatch;
+import java.util.stream.IntStream;
 import java.util.zip.CRC32;
 
 import static java.lang.Math.abs;
@@ -103,48 +103,37 @@ public class Run {
 //            memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
             System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
 
-            CountDownLatch latch = new CountDownLatch(p.n_heads);
             // multihead attention. iterate over all heads in parallel
-            int h;
-            for (h = 0; h < p.n_heads; h++) {
-                int finalH = h;
-                Thread.ofVirtual().start(() -> {
-                    // get the query vector for this head
+            IntStream.range(0, p.n_heads).parallel().forEach(h -> {
+                // get the query vector for this head
 //                float*q = s -> q + h * head_size;
-                    int queryIndex = finalH * head_size;
-                    // attention scores for this head
-                    int attentionIndex = finalH * p.seq_len;
+                int queryIndex = h * head_size;
+                // attention scores for this head
+                int attentionIndex = h * p.seq_len;
 
-                    int keyBase = loff + (finalH / kv_mul) * head_size;
+                int keyBase = loff + (h / kv_mul) * head_size;
 
-                    int maxIndex = finalH;
+                int maxIndex = h;
 
-                    AttentionLoop.call(s.q, s.l_key_cache, s.att, s.tmp1, maxIndex, attentionIndex, keyBase,
-                            kv_dim, queryIndex, pos, head_size);
+                AttentionLoop.call(s.q, s.l_key_cache, s.att, s.tmp1, maxIndex, attentionIndex, keyBase,
+                        kv_dim, queryIndex, pos, head_size);
 
-                    // softmax the scores to get attention weights, from 0..pos inclusively
+                // softmax the scores to get attention weights, from 0..pos inclusively
 //                softmax(s.att, attentionIndex, pos + 1);
 
-                    // find max value (for numerical stability)
+                // find max value (for numerical stability)
 //                    FindMax.call(s.tmp1, maxIndex, s.att, attentionIndex, pos + 1);
 
-                    // exp and sum
-                    ExpSumNormalize.call(s.att, s.tmp1, maxIndex, attentionIndex, pos + 1);
+                // exp and sum
+                ExpSumNormalize.call(s.att, s.tmp1, maxIndex, attentionIndex, pos + 1);
 
-                    // weighted sum of the values, store back into xb
-                    int xbIndex = finalH * head_size;
+                // weighted sum of the values, store back into xb
+                int xbIndex = h * head_size;
 
-                    int valueBase = loff + (finalH / kv_mul) * head_size;
-                    AccumWeightedValue.call(s.xb, s.att, s.l_value_cache, pos, xbIndex,
-                            valueBase, head_size, kv_dim, attentionIndex);
-                    latch.countDown();
-                });
-            }
-            try {
-                latch.await();
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
+                int valueBase = loff + (h / kv_mul) * head_size;
+                AccumWeightedValue.call(s.xb, s.att, s.l_value_cache, pos, xbIndex,
+                        valueBase, head_size, kv_dim, attentionIndex);
+            });
 
             // final matmul to get the output of the attention
             MatMul.callI8(s.xb2, s.xb, w.l_wo, l * dim * dim, dim, dim);
