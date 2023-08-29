@@ -506,53 +506,28 @@ achieved tok/s: 19.57
 achieved tok/s: 19.58
 achieved tok/s: 19.59
 
-run heads in parallel
-achieved tok/s: 12.68
-
-int numberOfThreads = 1;
-achieved tok/s: 14.09
-
-int numberOfThreads = 2;
-achieved tok/s: 15.09
-
-int numberOfThreads = 4;
-achieved tok/s:
-
-int numberOfThreads = 8;
-achieved tok/s: 13.44
-
-int numberOfThreads = 32;
-achieved tok/s: 12.92
-
 ----- CPU----- CPU----- CPU----- CPU
 
 dynamic threadcount
-achieved tok/s: 5.25
+achieved tok/s: 5.32
 
----------------- llama2j ----------------
-CUDA llama2_7b.bin 2 GPU
-MAX_THREADS_PER_BLOCK = 32;
-achieved tok/s: 9.8
+-XX:MaxInlineSize=255
+achieved tok/s: 5.34
 
-Parallelize
-// qkv matmuls for this position
-achieved tok/s: 10.0
+-XX:MaxInlineSize=255
+achieved tok/s: 5.32, 5.27
 
-Attention in two blocks
-achieved tok/s: 10.1
+IntStream.range() for matmul
 
-parallelize attention
-achieved tok/s: 10.2
+TARGET_THREAD_COUNT = 8 * Runtime.getRuntime().availableProcessors();
+achieved tok/s: 6.15
 
-eliminate redundant cuda.memZeroFloat.call(0, tmp1CU, 0, 1);
-achieved tok/s: 10.3
 
-MAX_THREADS_PER_BLOCK = 64;
-achieved tok/s: 9.2
+TARGET_THREAD_COUNT = 4 * Runtime.getRuntime().availableProcessors();
+achieved tok/s: 6.39
 
-CPU llama2_7b.bin
-achieved tok/s: 4.7
-
+remove latch
+achieved tok/s: 6.43, 6.33, 6.48
 
 
 
@@ -569,33 +544,3 @@ MP_NUM_THREADS=8 ./run llama2_7b.bin -t 1.0 -n 256 -i "One day, Lily met a Shogg
 achieved tok/s: 11.2
 
 ---------------- llama2j ----------------
-
-./run stories15M.bin
-achieved tok/s: 255.0 (20.6%)
-
-./run stories42M.bin
-achieved tok/s: 151.7 (18.0%)
-
-THREAD_COUNT = 32;
---checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
-achieved tok/s: 4.7 (42%)
-
---- OLD ---
-
-THREAD_COUNT = 8;
---checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
-achieved tok/s: 1.5 (13.4%)
-
-THREAD_COUNT = 16;
---checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
-achieved tok/s: 2.8 (17.9%)
-
-THREAD_COUNT = 32;
---checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
-achieved tok/s: 4.6 (41%)
-
-THREAD_COUNT = 64;
---checkpoint llama2_7b.bin --gpuMem "17,24,24,24"
-achieved tok/s: 2.7 (24.1%)
-
-----------------
