@@ -38,7 +38,7 @@ public abstract class Kernel {
 
     protected final String name;
 
-    private static final String KERNEL_DIRECTORY = "src/cuda";
+    private static final String KERNEL_DIRECTORY = "src/main/java/cuda";
 
     private static final String GENERATED_CUDA_SOURCE_PREFIX = "gen_";
     private static final String CUDA_SOURCE_EXTENSION = ".cu";
