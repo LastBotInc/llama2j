@@ -32,6 +32,6 @@ models
 
 .attach_pid*
 
-/target/classes/
+/target/
 /src/main/java/cuda/gen_*.cu
 /src/main/java/cuda/*.cubin
