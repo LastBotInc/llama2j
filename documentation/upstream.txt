@@ -20,6 +20,9 @@ Date:   Thu Aug 10 15:23:05 2023 +0000
 
 ---------------------------------------------------------------------------------------------------
 
+Created based on llama2.c version
+8/11/2023 by Tero Heinonen
+
 commit ce05cc28cf1e3560b873bb21837638a434520a67 (HEAD -> master, origin/master, origin/HEAD)
 Merge: f61807d ab39930
 Author: Andrej <andrej.karpathy@gmail.com>

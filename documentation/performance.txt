@@ -1,4 +1,4 @@
-Configuration 1: MZ33-AR0-000, AMD EPYC 9374f 32-core processor × 64, 4 * Nvidia 4090, 368GB 4800 DDR5
+This file is a temporary worksheet
 
 ------------ CUDA llama2_7b_chat.bin 1 GPU -------------
 achieved tok/s: 19.77
