@@ -1,7 +1,6 @@
 package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
-import com.lastbot.llama2j.LLogger;
 import jcuda.Pointer;
 import jcuda.driver.CUfunction;
 import jcuda.driver.CUstream;
@@ -10,13 +9,16 @@ import java.util.Arrays;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
-public class SumOfSquares extends Kernel {
+/**
+ * Kernel: implements normalized sum of squared
+ */
+public class RootMeanSquare extends Kernel {
     public static final int BLOCK_SIZE = 256;
 
     private final CUfunction smallKernel;
 
-    public SumOfSquares(ContextCUDA cuda) {
-        super(cuda, "sumOfSquares");
+    public RootMeanSquare(ContextCUDA cuda) {
+        super(cuda, "rootMeanSquare");
         smallKernel = createSmall();
     }
 
@@ -48,7 +50,7 @@ public class SumOfSquares extends Kernel {
 
         call(copyOfSum, copyOfx, size);
 
-        compareWithThreshold("SumOfSquares.call size " + size + " sum ",
+        compareWithThreshold("RootMeanSquare.call size " + size + " sum ",
                 sum, copyOfSum, 1e-2f);
     }
 
@@ -77,7 +79,7 @@ public class SumOfSquares extends Kernel {
         String code =
                 """
                             extern "C"
-                            __global__ void sumOfSquares(float* sum, float* x, int size) {
+                            __global__ void rootMeanSquare(float* sum, float* x, int size) {
                                     extern __shared__ float sdata[];
 
                                     int itemsPerThread = size / blockDim.x + 1;
@@ -112,6 +114,6 @@ public class SumOfSquares extends Kernel {
                                     }
                             }
                         """;
-        return loadFromCode(code, "sumOfSquares");
+        return loadFromCode(code, "rootMeanSquare");
     }
 }

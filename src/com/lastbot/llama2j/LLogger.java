@@ -4,16 +4,11 @@ import java.text.Format;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
+/**
+ * Simple logger, writes to stdout
+ */
 public class LLogger {
     private static final Format formatter = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
-
-    public static synchronized void internalError(String message) {
-        printError("INTERNAL ERROR: ", message, null);
-    }
-
-    public static synchronized void internalError(String message, Throwable t) {
-        printError("INTERNAL ERROR: ", message, t);
-    }
 
     public static synchronized void error(String message) {
         printError("ERROR", message, null);

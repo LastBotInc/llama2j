@@ -5,11 +5,31 @@ import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
 import java.nio.ByteBuffer;
 import java.util.Random;
 
+/**
+ * Simple I(N) linear quantifier of model weights. In this version, only I8 implemented.
+ * For each group, min and max are stored as FP32 and the weights inside the group are
+ * linearly encoded.
+ * <p>
+ * Note: when implementing other than I8 encodings, the encoding of weights needs to be
+ * implemented in this class and also the following methods need to be modified
+ * accordingly as they contain efficient implementation of decoding quantification with
+ * the operation in the same kernel. This supports for good performance.
+ * <p>
+ *  MatMul.callI8()
+ *  MatMul.callI8Single()
+ *  MatMul.callI8GroupAligns()
+ *  MatMul.callI8GroupDoesNotAlign()
+ *  MatMul.callI8(int streamId,...)
+ *  MatMul.createI8() - CUDA kernel that performs decoding and matrix vector multiplication
+ * <p>
+ *  WeightNormalizeAndScale.callI8()
+ *  WeightNormalizeAndScale.callI8(int streamId,...)
+ *  WeightNormalizeAndScale.create() - CUDA kernel that performs decoding and calculation
+ *
+ * @param groupSize group size
+ * @param bits      how many bits are used to encode a single FP32 value
+ */
 public record Quant(int groupSize, int bits) {
-    private static final int TEST_ITERATIONS = 100_000;
-    private static final double TEST_THRESHOLD_RELATIVE = 0.01;
-    private static final double TEST_THRESHOLD_ABS = 1e-2;
-
     private int originalBytesPerGroup() {
         return groupSize * Float.BYTES;
     }
@@ -97,6 +117,10 @@ public record Quant(int groupSize, int bits) {
         return Float.intBitsToFloat(asInt);
     }
 
+    private static final int TEST_ITERATIONS = 100_000;
+    private static final double TEST_THRESHOLD_RELATIVE = 0.01;
+    private static final double TEST_THRESHOLD_ABS = 1e-2;
+
     public ByteBuffer testEncode(float[] input) {
         int floatSize = input.length;
         ByteBuffer byteBuffer = encode(input);
@@ -123,7 +147,7 @@ public record Quant(int groupSize, int bits) {
                         float diff = Math.abs(input[floatIndex[0]] - value);
                         double relativeDiff = diff / Math.abs(original);
                         if (relativeDiff > TEST_THRESHOLD_RELATIVE && diff > TEST_THRESHOLD_ABS) {
-                            LLogger.error("floatIndex " + floatIndex + " relativeDiff " + relativeDiff);
+                            LLogger.error("floatIndex " + floatIndex[0] + " relativeDiff " + relativeDiff);
                         }
                         floatIndex[0]++;
                     });
@@ -137,7 +161,7 @@ public record Quant(int groupSize, int bits) {
         int byteSize = nChunks * encodedBytesPerGroup();
         ByteBuffer byteBuffer = ByteBuffer.allocate(byteSize);
 
-        // in chunks of quantSize, store first min and max as floats, and then
+        // in chunks of group size, store first min and max as floats, and then
         // groupSize bytes encoded as n-bit integers representing linear values between min and max
         // this version encodes only to 8-bit, but the same structure can be extended to any other bit quantity
         for (int chunk = 0; chunk < nChunks; chunk++) {

@@ -2,7 +2,6 @@ package com.lastbot.llama2j;
 
 import jcuda.Pointer;
 
-import java.io.DataOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -260,7 +259,6 @@ public class TransformerWeights {
                         int firstLayer = c.layerAllocation.firstCPULayer;
                         int lastLayer = c.layerAllocation.lastCPULayer;
                         int cpuLayers = lastLayer - firstLayer + 1;
-                        int cpuFloatOffset = Math.toIntExact((long) floatSize * firstLayer / totalLayers);
                         int cpuByteOffset = Math.toIntExact((long) totalByteSize * firstLayer / totalLayers);
                         int cpuByteSize = Math.toIntExact((long) totalByteSize * cpuLayers / totalLayers);
 
@@ -271,7 +269,7 @@ public class TransformerWeights {
                             throw new RuntimeException("remaining != cpuByteSize");
                         }
                         byteBuffer.get(cpuData, cpuByteOffset, cpuByteSize);
-                        quantArray = new QuantArray(quant, cpuData, cpuFloatOffset);
+                        quantArray = new QuantArray(quant, cpuData);
                     }
                 } else if (policy == LAST_DEVICE_ONLY) {
                     if (c.layerAllocation.deviceCount > 0) {
@@ -291,14 +289,13 @@ public class TransformerWeights {
                         int lastLayer = c.layerAllocation.lastCPULayer;
                         if (lastLayer == totalLayers - 1) {
                             int cpuLayers = lastLayer - firstLayer + 1;
-                            int cpuFloatOffset = Math.toIntExact((long) floatSize * firstLayer / totalLayers);
                             int cpuByteOffset = Math.toIntExact((long) totalByteSize * firstLayer / totalLayers);
                             int cpuByteSize = Math.toIntExact((long) totalByteSize * cpuLayers / totalLayers);
 
                             byte[] cpuData = new byte[cpuByteSize];
                             byteBuffer.rewind();
                             byteBuffer.get(cpuData, cpuByteOffset, cpuByteSize);
-                            quantArray = new QuantArray(quant, cpuData, cpuFloatOffset);
+                            quantArray = new QuantArray(quant, cpuData);
                         }
                     }
                 } else if (policy == FIRST_DEVICE_ONLY) {
@@ -319,14 +316,13 @@ public class TransformerWeights {
                         int lastLayer = c.layerAllocation.lastCPULayer;
                         if (firstLayer == 0) {
                             int cpuLayers = lastLayer - firstLayer + 1;
-                            int cpuFloatOffset = Math.toIntExact((long) floatSize * firstLayer / totalLayers);
                             int cpuByteOffset = Math.toIntExact((long) totalByteSize * firstLayer / totalLayers);
                             int cpuByteSize = Math.toIntExact((long) totalByteSize * cpuLayers / totalLayers);
 
                             byte[] cpuData = new byte[cpuByteSize];
                             byteBuffer.rewind();
                             byteBuffer.get(cpuData, cpuByteOffset, cpuByteSize);
-                            quantArray = new QuantArray(quant, cpuData, cpuFloatOffset);
+                            quantArray = new QuantArray(quant, cpuData);
                         }
                     }
                 } else if (policy == ALL_DEVICES) {
@@ -347,7 +343,7 @@ public class TransformerWeights {
                         byte[] cpuData = new byte[totalByteSize];
                         byteBuffer.rewind();
                         byteBuffer.get(cpuData, 0, totalByteSize);
-                        quantArray = new QuantArray(quant, cpuData, 0);
+                        quantArray = new QuantArray(quant, cpuData);
                     }
                 } else {
                     throw new RuntimeException("Policy " + policy + " not implemented");
@@ -358,5 +354,4 @@ public class TransformerWeights {
             }
         });
     }
-
 }

@@ -5,6 +5,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Handles command line parameters, usage info, error checking, default values
+ */
 public class CommandLine {
     private static final String CHECKPOINT = "--checkpoint";
     private static final String MODE = "--mode";
@@ -25,7 +28,7 @@ public class CommandLine {
     private String prompt = "One day, Lily met a Shoggoth";      // prompt string
     private String tokenizer = "tokenizer.bin";      // tokenizer file
 
-    private long GIGA = 1024L * 1024L * 1024L;
+    private static final long GIGA = 1024L * 1024L * 1024L;
 
     private long[] gpuMem = null;
 

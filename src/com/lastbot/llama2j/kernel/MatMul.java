@@ -75,7 +75,7 @@ public class MatMul extends Kernel {
     }
 
     public static void callI8(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
-        Quant q = w.getQuant();
+        Quant q = w.quant();
         int groupSize = q.groupSize();
         if (weightIndex % groupSize == 0 && n % groupSize == 0) {
             callI8GroupAligns(xout, x, w, weightIndex, n, d);
@@ -85,7 +85,7 @@ public class MatMul extends Kernel {
     }
 
     public static void callI8Single(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
-        Quant q = w.getQuant();
+        Quant q = w.quant();
         int groupSize = q.groupSize();
         if (weightIndex % groupSize == 0 && n % groupSize == 0) {
             callI8GroupAligns(xout, x, w, weightIndex, n, d);
@@ -96,9 +96,9 @@ public class MatMul extends Kernel {
 
     public static void callI8GroupAligns(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
         // W (d,n) @ x (n,) -> xout (d,)
-        Quant q = w.getQuant();
+        Quant q = w.quant();
 
-        byte[] encoded = w.getByteArray();
+        byte[] encoded = w.data();
 
         int bytesPerGroup = q.encodedBytesPerGroup();
 
@@ -152,9 +152,9 @@ public class MatMul extends Kernel {
 
     public static void callI8GroupDoesNotAlign(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
         // W (d,n) @ x (n,) -> xout (d,)
-        Quant q = w.getQuant();
+        Quant q = w.quant();
 
-        byte[] encoded = w.getByteArray();
+        byte[] encoded = w.data();
 
         int bytesPerGroup = q.encodedBytesPerGroup();
 
@@ -213,9 +213,9 @@ public class MatMul extends Kernel {
 
     public static void callI8Simple(float[] xout, float[] x, QuantArray w, int weightIndex, int n, int d) {
         // W (d,n) @ x (n,) -> xout (d,)
-        Quant q = w.getQuant();
+        Quant q = w.quant();
 
-        byte[] encoded = w.getByteArray();
+        byte[] encoded = w.data();
 
         int weightPos;
         for (int i = 0; i < d; i++) {
@@ -223,9 +223,7 @@ public class MatMul extends Kernel {
             int[] index = new int[1];
             float[] val = new float[1];
             q.decode(encoded, weightPos, n,
-                    (value) -> {
-                        val[0] += value * x[index[0]++];
-                    });
+                    (value) -> val[0] += value * x[index[0]++]);
 
             if (index[0] != n) {
                 throw new RuntimeException("index[0] != n");
@@ -261,8 +259,8 @@ public class MatMul extends Kernel {
         float[] copyOfx = Arrays.copyOf(x, x.length);
         Pointer pXout = cuda.allocateAndCopyToDevice(TEST_STREAM, xout, false);
         Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
-        Quant q = w.getQuant();
-        Pointer pw = cuda.allocateAndCopyToDevice(TEST_STREAM, w.getByteArray(), false);
+        Quant q = w.quant();
+        Pointer pw = cuda.allocateAndCopyToDevice(TEST_STREAM, w.data(), false);
         cuda.synchronizeStream(TEST_STREAM);
         callI8(TEST_STREAM, pXout, px, pw, q, weightIndex, n, d);
         cuda.synchronizeStream(TEST_STREAM);
@@ -314,15 +312,15 @@ public class MatMul extends Kernel {
     }
 
     public void callI8(int streamId, Pointer xout, Pointer x, QuantPointer w, int weightIndex, int n, int d) {
-        Pointer encoded = w.getPointer();
-        Quant q = w.getQuant();
-        if ((long) weightIndex - w.getFloatOffset() < 0) {
+        Pointer encoded = w.pointer();
+        Quant q = w.quant();
+        if ((long) weightIndex - w.floatOffset() < 0) {
             throw new RuntimeException("(long)weightIndex - w.getFloatOffset() < 0)");
         }
-        if ((long) weightIndex - w.getFloatOffset() > Integer.MAX_VALUE) {
+        if ((long) weightIndex - w.floatOffset() > Integer.MAX_VALUE) {
             throw new RuntimeException("(long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE");
         }
-        int adjustedWeightIndex = Math.toIntExact(weightIndex - w.getFloatOffset());
+        int adjustedWeightIndex = Math.toIntExact(weightIndex - w.floatOffset());
         callI8(streamId, xout, x, encoded, q, adjustedWeightIndex, n, d);
     }
 

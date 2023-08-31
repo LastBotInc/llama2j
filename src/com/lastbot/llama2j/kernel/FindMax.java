@@ -10,6 +10,9 @@ import java.util.Arrays;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
+/**
+ * Kernel: returns max value of an array
+ */
 public class FindMax extends Kernel {
     public static final int BLOCK_SIZE = 64;
     private static final int SIMPLE_KERNEL_THRESHOLD = 32;

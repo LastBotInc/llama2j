@@ -8,6 +8,9 @@ import java.util.Arrays;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
+/**
+ * Kernel: normalizes an array with a divider
+ */
 public class Normalize extends Kernel {
     public static final int BLOCK_SIZE = 64;
 

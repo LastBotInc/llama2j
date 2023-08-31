@@ -17,6 +17,10 @@ import static jcuda.runtime.JCuda.*;
 import static jcuda.runtime.cudaError.cudaSuccess;
 import static jcuda.runtime.cudaMemcpyKind.*;
 
+/**
+ * Execution context for a single CUDA device. Provides utilities such as memory, transfer, kernel,
+ * and some convenience functions.
+ */
 public class ContextCUDA implements Closeable {
     public static final int STREAM_COUNT;
     public static final int TEST_STREAM;
@@ -28,7 +32,7 @@ public class ContextCUDA implements Closeable {
     public final AttentionLoop attentionLoop;
     public final ExpSumNormalize expSumNormalize;
     public final FindMax findMax;
-    public final SumOfSquares sumOfSquares;
+    public final RootMeanSquare rootMeanSquare;
     public final MatMul matMul;
     public final Normalize normalize;
     public final Silu silu;
@@ -88,7 +92,7 @@ public class ContextCUDA implements Closeable {
         this.attentionLoop = new AttentionLoop(this);
         this.expSumNormalize = new ExpSumNormalize(this);
         this.findMax = new FindMax(this);
-        this.sumOfSquares = new SumOfSquares(this);
+        this.rootMeanSquare = new RootMeanSquare(this);
         this.matMul = new MatMul(this);
         this.normalize = new Normalize(this);
         this.silu = new Silu(this);
@@ -235,8 +239,8 @@ public class ContextCUDA implements Closeable {
     public void copyFloatsFromDeviceToDevice(int streamId, QuantPointer sourceDeviceArray, long sourceIndex,
                                              Pointer targetDeviceArray, long targetIndex,
                                              long floatSize) {
-        Pointer sourcePointer = sourceDeviceArray.getPointer();
-        int sourceOffset = Math.toIntExact(sourceIndex - sourceDeviceArray.getFloatOffset()) * Sizeof.FLOAT;
+        Pointer sourcePointer = sourceDeviceArray.pointer();
+        int sourceOffset = Math.toIntExact(sourceIndex - sourceDeviceArray.floatOffset()) * Sizeof.FLOAT;
 
         copyBytesFromDeviceToDevice(streamId, sourcePointer, sourceOffset,
                 targetDeviceArray, targetIndex * Sizeof.FLOAT, floatSize * Sizeof.FLOAT);
@@ -297,86 +301,6 @@ public class ContextCUDA implements Closeable {
             throw new RuntimeException(msg);
         }
         return false;
-    }
-
-    //    private static final int TEST_SIZE = FLOAT_ARRAY_MAX_SIZE;
-//    private static final int TEST_SIZE = 576_512; // estimated for LLama 2, 7B
-    private static final int TEST_SIZE = 2 * 576_512; // estimated for LLama 2, 70B; dim = 4096, seq_len = 4096
-
-    private static void test() {
-        float[] d1 = new float[TEST_SIZE];
-        float[] temp = new float[TEST_SIZE];
-        float[] d2 = new float[TEST_SIZE];
-        for (int i = 0; i < TEST_SIZE; i++) {
-            d1[i] = i / 1000f;
-        }
-        long t1, t1b, t2, t3, t4, t5, t6, t7;
-
-        try (ContextCUDA context0 = new ContextCUDA("context0", 0);
-             ContextCUDA context1 = new ContextCUDA("context1", 1)) {
-
-            t1 = System.currentTimeMillis();
-            Pointer d1Pointer = context0.allocateFloatArray(TEST_SIZE, true);
-            t1b = System.currentTimeMillis();
-            context0.copyFromHostToDevice(0, d1, d1.length, d1Pointer);
-
-            t2 = System.currentTimeMillis();
-            Pointer d2Pointer = context1.allocateFloatArray(TEST_SIZE, true);
-            t3 = System.currentTimeMillis();
-
-            if (d1Pointer != null) {
-                if (d2Pointer != null) {
-                    context0.synchronizeStream(0);
-                    t4 = System.currentTimeMillis();
-                    context0.copyFromDeviceToAnotherDevice(0, d1Pointer, d2Pointer,
-                            context1, 1, d1.length, temp);
-                    t5 = System.currentTimeMillis();
-                    context1.synchronizeStream(1);
-                    t6 = System.currentTimeMillis();
-                    context1.copyFromDeviceToHost(1, d2Pointer, d2.length, d2);
-                    t7 = System.currentTimeMillis();
-                    int errorCount = 0;
-                    for (int i = 0; i < TEST_SIZE; i++) {
-                        if (d1[i] != d2[i]) {
-                            LLogger.error(i + "d1 " + d1[i] + ", d2 " + d2[i]);
-                            errorCount++;
-                        }
-                    }
-                    double gigabytes = ((double) TEST_SIZE * Float.BYTES) / 1024 / 1024 / 1024;
-
-                    LLogger.info(String.format("%,.0f", gigabytes) + " GB");
-
-                    LLogger.time("allocateFloatArray", t1, t1b);
-                    LLogger.time("allocateAndCopyToDevice", t1b, t2);
-                    LLogger.info("host to device " + String.format("%,.1f",
-                            (gigabytes / ((t2 - t1b) / 1000D))) + " GB per second");
-
-                    LLogger.time("allocateFloatArray", t2, t3);
-                    LLogger.time("context0.synchronizeTransfer", t3, t4);
-                    LLogger.time("context0.copyFromDeviceToAnotherDevice", t4, t5);
-                    LLogger.info("device to device " + String.format("%,.1f",
-                            (gigabytes / ((t5 - t4) / 1000D))) + " GB per second");
-
-                    LLogger.time("context1.synchronizeTransfer()", t5, t6);
-                    LLogger.time("context1.copyFromDeviceToHost", t6, t7);
-
-                    if (errorCount == 0) {
-                        LLogger.info("Success");
-                    } else {
-                        LLogger.info("Failure with " + String.format("%,d", errorCount) + " errors");
-                    }
-                    return;
-                }
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        LLogger.info("Failure, processing terminated with an error");
-    }
-
-    public static void main(String[] args) {
-        test();
-        test();
     }
 
     public CUstream getCUKernelStream(int k) {

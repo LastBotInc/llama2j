@@ -8,7 +8,7 @@ public enum Mode {
 
     /**
      * Divides the model across CUDA devices that are configured in the command line.
-     * Automatically uses CPU if the model does not fit in the configured CUDA device memory.
+     * TODO: Automatically uses CPU if the model does not fit in the configured CUDA device memory.
      */
     CUDA,
 

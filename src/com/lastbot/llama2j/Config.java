@@ -1,7 +1,7 @@
 package com.lastbot.llama2j;
 
 /**
- * Transformer and RunState structs, and related memory management
+ * Transformer configuration
  */
 public class Config {
     int dim; // transformer dimension

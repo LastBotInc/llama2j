@@ -1,7 +1,6 @@
 package com.lastbot.llama2j.kernel;
 
 import com.lastbot.llama2j.ContextCUDA;
-import com.lastbot.llama2j.LLogger;
 import jcuda.Pointer;
 import jcuda.Sizeof;
 import jcuda.driver.CUfunction;
@@ -11,6 +10,11 @@ import java.util.Arrays;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
+/**
+ * Kernel: runs attention loop
+ * <p>
+ * See call() for details.
+ */
 public class AttentionLoop extends Kernel {
     public static final int BLOCK_SIZE = 32;
 

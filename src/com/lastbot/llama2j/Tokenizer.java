@@ -9,6 +9,12 @@ import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Byte pair encoding (BPE) tokenizer with encode and decode methods.
+ *
+ * NOTE: assumes tokenizer file uses UTF8.
+ *
+ */
 public class Tokenizer implements Closeable {
     private static final Charset CHARSET = StandardCharsets.UTF_8;
     private static final boolean DEBUG = false;
@@ -18,7 +24,6 @@ public class Tokenizer implements Closeable {
     private final float[] vocab_scores;
 
     private final TokenIndex[] sorted_vocab;
-    private final int vocabSize;
 
     private record TokenIndex(String str, int id) implements Comparable<TokenIndex> {
         @Override
@@ -56,7 +61,6 @@ public class Tokenizer implements Closeable {
      */
     public Tokenizer(String tokenizerFilePath, int vocabSize) {
         // read in the tokenizer.bin file
-        this.vocabSize = vocabSize;
         this.vocab = new String[vocabSize];
         this.vocab_scores = new float[vocabSize];
         this.sorted_vocab = new TokenIndex[vocabSize];
@@ -64,7 +68,7 @@ public class Tokenizer implements Closeable {
         long startTokenizerRead = System.currentTimeMillis();
 
         try (BinFileReader reader = new BinFileReader(tokenizerFilePath)) {
-            int max_token_length = reader.nextInt();
+            int max_token_length_ignored = reader.nextInt();
 
             for (int i = 0; i < vocabSize; i++) {
                 vocab_scores[i] = reader.nextFloat();
@@ -97,16 +101,6 @@ public class Tokenizer implements Closeable {
         return -1;
     }
 
-//    private static int str_lookup(String str, String[] vocab) {
-//        // find the first perfect match for str in vocab, return its index or -1 if not found
-//        for (int i = 0; i < vocab.length; i++) {
-//            if (vocab[i].equals(str)) {
-//                return i;
-//            }
-//        }
-//        return -1;
-//    }
-
     public int[] bpe_encode(String prompt) {
         int[] tokens = new int[prompt.length() * 2 + 1];
         // first encode every individual byte in the input string
@@ -118,12 +112,7 @@ public class Tokenizer implements Closeable {
         char[] characters = prompt.toCharArray();
 
         for (int i = 0; i < prompt.length(); i++) {
-//            int id2 = str_lookup(Character.toString(characters[i]), sorted_vocab);
             int id = str_lookup(characters[i], vocab);
-//            if (id != id2) {
-//                LLogger.error("toked id " + id + " id2 " + id2);
-//            }
-
             if (id != -1) {
                 // we found this codepoint in vocab, add it as a token
                 tokens[n_tokens++] = id;
@@ -223,6 +212,6 @@ public class Tokenizer implements Closeable {
 
     @Override
     public void close() {
-
+        // nothing
     }
 }

@@ -6,9 +6,11 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 
+/**
+ * Generic writer of binary files using fast memory mapping
+ */
 public class BinFileWriter {
     private final String filePath;
-    private long writtenSize = 0;
 
     @SuppressWarnings("resource")
     public BinFileWriter(String filePath) {
@@ -19,6 +21,7 @@ public class BinFileWriter {
         try (RandomAccessFile file = new RandomAccessFile(filePath, "rw");
              FileChannel channel = file.getChannel()) {
             int bytes = Integer.BYTES + byteBuffer.remaining();
+            long writtenSize = 0;
             ByteBuffer mappedBuffer = channel.map(FileChannel.MapMode.READ_WRITE, writtenSize, bytes);
             mappedBuffer.order(ByteOrder.LITTLE_ENDIAN);
 

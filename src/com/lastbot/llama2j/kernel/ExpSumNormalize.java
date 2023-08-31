@@ -9,6 +9,9 @@ import java.util.Arrays;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
+/**
+ * Kernel: Implements softmax as a single kernel
+ */
 public class ExpSumNormalize extends Kernel {
     public static final int BLOCK_SIZE = 128;
 
@@ -49,7 +52,7 @@ public class ExpSumNormalize extends Kernel {
 
         call(copyOfx, maxValue, maxIndex, index, size);
 
-        compareWithThreshold("ExpAndSum.call x ",
+        compareWithThreshold("ExpSumNormalize.call x ",
                 x, copyOfx, 1e-5f);
     }
 

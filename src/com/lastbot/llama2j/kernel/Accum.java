@@ -8,6 +8,9 @@ import java.util.Arrays;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
+/**
+ * Kernel: Adds a vector to another.
+ */
 public class Accum extends Kernel {
     public static final int BLOCK_SIZE = 64;
 

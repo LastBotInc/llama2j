@@ -7,10 +7,15 @@ import jcuda.Sizeof;
 import jcuda.driver.CUfunction;
 
 import java.util.Arrays;
-import java.util.stream.IntStream;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
+/**
+ * Kernel: Calculates accumulated attention values to be stored back to xb
+ * <p>
+ * See: callNoUnroll() for details.
+ *
+ */
 public class AccumWeightedValue extends Kernel {
     public static final int BLOCK_SIZE = 64;
 
@@ -25,6 +30,15 @@ public class AccumWeightedValue extends Kernel {
 
     public static void call(float[] xb, float[] att, float[] l_value_cache, int pos, int xbIndex,
                             int valueBase, int head_size, int kv_dim, int attentionIndex) {
+        if (head_size % 4 == 0) {
+            callUnroll4(xb, att, l_value_cache, pos, xbIndex, valueBase, head_size, kv_dim, attentionIndex);
+        } else {
+            callNoUnroll(xb, att, l_value_cache, pos, xbIndex, valueBase, head_size, kv_dim, attentionIndex);
+        }
+    }
+
+    public static void callUnroll4(float[] xb, float[] att, float[] l_value_cache, int pos,
+                                   int xbIndex, int valueBase, int head_size, int kv_dim, int attentionIndex) {
         // weighted sum of the values, store back into xb
         int vIndex = valueBase;
         float a;
@@ -45,6 +59,29 @@ public class AccumWeightedValue extends Kernel {
                 xb[xbIndex + i + 1] += a * l_value_cache[vIndex + i + 1];
                 xb[xbIndex + i + 2] += a * l_value_cache[vIndex + i + 2];
                 xb[xbIndex + i + 3] += a * l_value_cache[vIndex + i + 3];
+            }
+            vIndex += kv_dim;
+        }
+    }
+
+    public static void callNoUnroll(float[] xb, float[] att, float[] l_value_cache, int pos, int xbIndex,
+                                    int valueBase, int head_size, int kv_dim, int attentionIndex) {
+        // weighted sum of the values, store back into xb
+        int vIndex = valueBase;
+        float a;
+        int t;
+        int i;
+
+        for (i = 0; i < head_size; i++) {
+            xb[xbIndex + i] = 0f;
+        }
+        for (t = 0; t <= pos; t++) {
+            // get the value vector for this head and at this timestep
+            // get the attention weight for this timestep
+            a = att[attentionIndex + t];
+            // accumulate the weighted value into xb
+            for (i = 0; i < head_size; i++) {
+                xb[xbIndex + i] += a * l_value_cache[vIndex + i];
             }
             vIndex += kv_dim;
         }
@@ -126,13 +163,6 @@ public class AccumWeightedValue extends Kernel {
 
                                     #pragma unroll 8
                                     for (int t = 0; t <= pos; t++) {
-                                        // get the value vector for this head and at this timestep
-                                        // = valueBase + t * kv_dim;
-                                        
-                                        // get the attention weight for this timestep
-                                        // attPointer[t];
-
-                                        // accumulate the weighted value into xb
                                         sum += attPointer[t] * valuePointer[t * kv_dim];
                                     }
                                     xb[xbIndex + i] = sum;

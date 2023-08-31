@@ -5,6 +5,16 @@ import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
 import java.util.Arrays;
 import java.util.Random;
 
+/**
+ * Provides three samples for logits: argmax, sample, sample_topp
+ * <p>
+ * NOTE: these are implemented as CPU only as this represents ignorable
+ * processing time vs. transformer.
+ * <p>
+ * When the whole transformer will be implemented in CUDA, this will
+ * need too. That will save the transfer latency of the selected token and
+ * the logits between CPU and GPU.
+ */
 public class Sampler {
     private final Random random;
     private final ProbIndex[] probIndex; // buffer used in top-p sampling, CPU only
@@ -47,7 +57,6 @@ public class Sampler {
         }
         return max_i;
     }
-
 
     // struct used when sorting probabilities during top-p sampling, CPU only
     public static class ProbIndex implements Comparable<ProbIndex> {

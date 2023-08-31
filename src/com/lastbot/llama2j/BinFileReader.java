@@ -11,11 +11,20 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * Generic reader for binary files of binary files using fast memory mapping,
+ * with convenience functions for arrays of base types
+ */
 public class BinFileReader implements Closeable {
     private final String filePath;
     private long readSize = 0;
     private final FileChannel channel;
 
+    /**
+     * Byte order of data files
+     */
+    private final ByteOrder BYTE_ORDER = ByteOrder.LITTLE_ENDIAN;
+    
     @SuppressWarnings("resource")
     public BinFileReader(String filePath) throws IOException {
         this.filePath = filePath;
@@ -58,7 +67,7 @@ public class BinFileReader implements Closeable {
             int size = Math.toIntExact(Math.min(Limits.ARRAY_MAX_SIZE, remaining));
             try {
                 MappedByteBuffer byteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, readSize, size);
-                byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+                byteBuffer.order(BYTE_ORDER);
                 buffers.add(byteBuffer);
                 readSize += size;
                 remaining -= size;
@@ -76,24 +85,11 @@ public class BinFileReader implements Closeable {
     public ByteBuffer nextByteBufferByByteCount(int bytes) throws IOException {
         ByteBuffer byteBuffer = ByteBuffer.allocateDirect(bytes);
         MappedByteBuffer mappedByteBuffer = channel.map(FileChannel.MapMode.READ_ONLY, readSize, bytes);
-        mappedByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
-        byteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+        mappedByteBuffer.order(BYTE_ORDER);
+        byteBuffer.order(BYTE_ORDER);
         byteBuffer.put(mappedByteBuffer);
         byteBuffer.flip();
         return byteBuffer;
-    }
-
-    public byte[] nextByteArray(int byteCount) throws IOException {
-        List<MappedByteBuffer> buffers = nextByteBuffer(byteCount);
-        byte[] combinedArray = new byte[byteCount];
-
-        int arrayPos = 0;
-        for (ByteBuffer byteBuffer : buffers) {
-            int bufferSize = byteBuffer.remaining();
-            byteBuffer.get(combinedArray, arrayPos, bufferSize);
-            arrayPos += bufferSize;
-        }
-        return combinedArray;
     }
 
     public float[] nextFloatArray(int floatCount) throws IOException {

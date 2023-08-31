@@ -12,16 +12,26 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.attribute.FileTime;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
 
 import static jcuda.driver.JCudaDriver.cuModuleGetFunction;
 import static jcuda.driver.JCudaDriver.cuModuleLoad;
 import static jcuda.runtime.JCuda.cudaGetErrorString;
 import static jcuda.runtime.cudaError.cudaSuccess;
 
+/**
+ * Parent class for all kernels. Takes care of code compilation to the target environment.
+ * <p>
+ * NOTE: here paths and target architecture are hard-coded.
+ * <p>
+ * Please see the constants at the beginning of
+ * file.
+ */
 public abstract class Kernel {
+    /**
+     * Normally keep SYNC_KERNEL_CALLS false . Change to true for testing oly to
+     * catch errors in kernel execution eagerly after the kernel call. Setting true
+     * will harm performance.
+     */
     protected final boolean SYNC_KERNEL_CALLS = false;
 
     protected final ContextCUDA cuda;

@@ -33,9 +33,9 @@ public class WeightNormalizeAndScale extends Kernel {
                               float[] sumOfSquares, int size) {
         float ss = sumOfSquares[0];
         // W (d,n) @ x (n,) -> xout (d,)
-        Quant q = w.getQuant();
+        Quant q = w.quant();
 
-        byte[] encoded = w.getByteArray();
+        byte[] encoded = w.data();
 
         int groupSize = q.groupSize();
         int encodedBytesPerGroup = q.encodedBytesPerGroup();
@@ -82,8 +82,8 @@ public class WeightNormalizeAndScale extends Kernel {
         float[] copyOfx = Arrays.copyOf(x, x.length); // x can point to out!
         Pointer pOut = cuda.allocateAndCopyToDevice(TEST_STREAM, out, false);
         Pointer px = cuda.allocateAndCopyToDevice(TEST_STREAM, x, false);
-        QuantPointer pWeight = new QuantPointer(w.getQuant(),
-                cuda.allocateAndCopyToDevice(TEST_STREAM, w.getByteArray(), false), 0);
+        QuantPointer pWeight = new QuantPointer(w.quant(),
+                cuda.allocateAndCopyToDevice(TEST_STREAM, w.data(), false), 0);
         Pointer pSumOfSquares = cuda.allocateAndCopyToDevice(TEST_STREAM, sumOfSquares, false);
         cuda.synchronizeStream(TEST_STREAM);
         callI8(TEST_STREAM, pOut, px, pWeight, weightIndex, pSumOfSquares, size);
@@ -92,7 +92,7 @@ public class WeightNormalizeAndScale extends Kernel {
         cuda.synchronizeStream(TEST_STREAM);
         cuda.free(pOut);
         cuda.free(px);
-        cuda.free(pWeight.getPointer());
+        cuda.free(pWeight.pointer());
         cuda.free(pSumOfSquares);
 
         callI8(copyOfOut, copyOfx, w, weightIndex, sumOfSquares, size);
@@ -114,7 +114,7 @@ public class WeightNormalizeAndScale extends Kernel {
 
     public void callFP32(int streamId, Pointer out, Pointer x, Pointer weight, Pointer sumOfSquares, int size) {
 //        __global__ void weightNormalizeAndScale(float *out, const float *x, const float *weight,
-//                    const float* sumOfSquares, const int size)
+//                    const float* rootMeanSquare, const int size)
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(out),
                 Pointer.to(x),
@@ -141,15 +141,15 @@ public class WeightNormalizeAndScale extends Kernel {
     public void callI8(int streamId, Pointer out, Pointer x, QuantPointer w, int weightIndex,
                        Pointer sumOfSquares, int size) {
         // W (d,n) @ x (n,) -> xout (d,)
-        Quant q = w.getQuant();
+        Quant q = w.quant();
 
-        if ((long)weightIndex - w.getFloatOffset() < 0) {
+        if ((long)weightIndex - w.floatOffset() < 0) {
             throw new RuntimeException("(long)weightIndex - w.getFloatOffset() < 0)");
         }
-        if ((long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE) {
+        if ((long)weightIndex - w.floatOffset() > Integer.MAX_VALUE) {
             throw new RuntimeException("(long)weightIndex - w.getFloatOffset() > Integer.MAX_VALUE");
         }
-        int adjustedWeightIndex = Math.toIntExact(weightIndex - w.getFloatOffset());
+        int adjustedWeightIndex = Math.toIntExact(weightIndex - w.floatOffset());
 
         int groupSize = q.groupSize();
         int startGroupIndex = q.groupIndexByFloatIndex(adjustedWeightIndex);
@@ -158,12 +158,12 @@ public class WeightNormalizeAndScale extends Kernel {
         int encodedBytesPerGroup = q.encodedBytesPerGroup();
 
 //        __global__ void weightNormalizeAndScale(float *out, const float *x, const float *encoded,
-//                            const float* sumOfSquares, const int weightIndex, const int startGroupIndex,
+//                            const float* rootMeanSquare, const int weightIndex, const int startGroupIndex,
 //                            const int encodedBytesPerGroup, const int groupSize, const int size)
         Pointer kernelParameters = Pointer.to(
                 Pointer.to(out),
                 Pointer.to(x),
-                Pointer.to(w.getPointer()),
+                Pointer.to(w.pointer()),
                 Pointer.to(sumOfSquares),
                 Pointer.to(new int[]{adjustedWeightIndex}),
                 Pointer.to(new int[]{startGroupIndex}),

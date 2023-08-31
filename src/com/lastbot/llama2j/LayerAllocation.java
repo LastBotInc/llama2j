@@ -1,5 +1,10 @@
 package com.lastbot.llama2j;
 
+/**
+ * Specifies how the transformer layers are allocated across a number of CUDA devices and potentially CPU.
+ * Note: in this version migration of transformer execution and run state propagation from CUDA to CPU is
+ * not implemented. When desired that needs to be implemented in the {@link Run} transformer() method.
+ */
 public class LayerAllocation {
     public final int nLayers;
     public final int deviceCount;
@@ -90,13 +95,10 @@ public class LayerAllocation {
             } else // if (mode == Mode.CUDA)
             {
                 // this version does not allow for roll over CUDA layers to CPU
+                // see Run.transformer()
                 // todo enable GPU roll over to CPU layers in CUDA mode
                 firstCPULayer = -1;
                 lastCPULayer = -1;
-//                if (nextLayer < p.n_layers) {
-//                    firstCPULayer = nextLayer;
-//                    lastCPULayer = p.n_layers - 1;
-//                }
             }
         }
         LLogger.info("--------- Allocation ---------");

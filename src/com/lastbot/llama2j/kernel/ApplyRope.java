@@ -9,8 +9,15 @@ import java.util.Arrays;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
+/**
+ * Apply RoPe rotational positions to query and key
+ * <p>
+ * On CPU sin() cos() are cached for performance.
+ */
 public class ApplyRope extends Kernel {
     public static final int BLOCK_SIZE = 64;
+
+    private static final float FREQUENCY = 10000.0f;
 
     private final ContextCUDA cuda;
     private final CUfunction kernel;
@@ -39,7 +46,7 @@ public class ApplyRope extends Kernel {
             int index;
             for (i = 0; i < dim; i += 2) {
                 int head_dim = i % head_size;
-                float freq = (float) (1.0f / Math.pow(10000.0f, head_dim / (float) head_size));
+                float freq = (float) (1.0f / Math.pow(FREQUENCY, head_dim / (float) head_size));
                 for (pos = 0; pos < seqLen; pos++) {
                     val = pos * freq;
                     index = (pos * dim / 2) + i / 2;
@@ -51,7 +58,7 @@ public class ApplyRope extends Kernel {
         });
     }
 
-    public static void call(float[] q, float[] k, int pos, int dim, int kv_dim, int head_size) {
+    public static void call(float[] q, float[] k, int pos, int dim, int kv_dim) {
         // if not initialized, accessing cache will throw an exception
 
         // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
@@ -98,7 +105,7 @@ public class ApplyRope extends Kernel {
         cuda.free(pq);
         cuda.free(pk);
 
-        call(copyOfQ, copyOfK, pos, dim, kv_dim, head_size);
+        call(copyOfQ, copyOfK, pos, dim, kv_dim);
 
         compareWithThreshold("ApplyRope.call q", q, copyOfQ, 1e-5f);
         compareWithThreshold("ApplyRope.call k", k, copyOfK, 1e-5f);
@@ -148,7 +155,7 @@ public class ApplyRope extends Kernel {
                                 }
 
                                 int head_dim = i % head_size;
-                                float freq = (float) (1.0f / powf(10000.0f, head_dim / (float)head_size));
+                                float freq = (float) (1.0f / powf(<FREQUENCY>, head_dim / (float)head_size));
                                 float val = pos * freq;
                                 float fcr = (float) cosf(val);
                                 float fci = (float) sinf(val);
@@ -170,7 +177,7 @@ public class ApplyRope extends Kernel {
                                 }
                             }
                         """;
-
+        code = code.replaceAll("<FREQUENCY>", String.format("%.1f", FREQUENCY));
         return loadFromCode(code, "applyRope");
     }
 }

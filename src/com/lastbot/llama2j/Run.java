@@ -5,66 +5,60 @@ import jcuda.Pointer;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.stream.IntStream;
-import java.util.zip.CRC32;
 
 import static java.lang.Math.abs;
 
 /*
-Inference for Llama-2 Transformer model in pure Java and with optional CUDA.
-
-Objectives: reasonable (among the world's fastest) latency, with the absolutely leading
-best throughput on systems with one or multiple NVIDIA gaming GPUs such as 4090.
+Inference for Llama-2 Transformer model in pure Java and with optional CUDA on multiple GPU.
 
 Adapted from and inspired by: :https://github.com/karpathy/llama2.c
 
-See file upstream.txt for details on the commit that this version is synchronized with.
+See file upstream.txt for details on the commit that this version is consistent with.
+
+Comments containing c-code are left to help to refer to the llama2.c implementation.
 
 */
 public class Run {
+    /**
+     * Group size for quantization, set freely to any value, but
+     * consider only 32, 64, 128, 256, 515 for the best performance.
+     */
     public static final int QUANT_GROUP_SIZE = 256;
     public static final int QUANT_BITS = 8;
 
+    /**
+     * Directory relative to the current to load model snapshot from and to write
+     * quant cache files to.
+     */
     private static final String MODELS_DIRECTORY = "models";
 
-// ----------------------------------------------------------------------------
-// The below commented-out functions show how to implement rmsnorm() or softmax()
-// in case the upstream code changes and requires to use them additionally.
 
-// rmsnorm
-
-//    private static void rmsnorm(float[] out, int outIndex, float[] x, float[] weight, int weightIndex, int size) {
-//        float[] ss = {0f};
-//        sumOfSquares(ss, x, size);
-//        normalizeAndScale(out, x, weight, weightIndex, ss, size);
-//    }
-
-// softmax
-
-//    private static void softmax(float[] x, int index, int size) {
-//        // find max value (for numerical stability)
-//        float[] max = {0f};
-//        findMax(max, x, index, size);
-//
-//        // exp and sum
-//        float[] sum = {0f};
-//        expAndSum(sum, x, max, index, size);
-//
-//        // normalize
-//        normalize(sum, x, index, size);
-//    }
-
+    /**
+     * Executes transformer in the desired mode and context
+     * Note: in this version migration of transformer execution and run state propagation from CUDA to CPU is
+     * not implemented. When desired, we need to change this function to call transformerCPU after transformerCUDA()
+     * in case the run state has not reached final layer.
+     */
     private static void transformer(int token, int pos, Mode mode, Config p, RunState s,
                                     TransformerWeights w, Context context) {
         switch (mode) {
-            case CPU -> transformerCPU(token, pos, p, s, w, context);
+            case CPU -> transformerCPU(token, pos, p, s, w);
             case CUDA -> transformerCUDA(token, pos, p, s, w, context);
             case TEST -> transformerTest(token, pos, p, s, w, context);
         }
     }
 
-    private static void transformerCPU(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
+    /**
+     * Implements CPU only transformer.
+     *
+     * @param token current token
+     * @param pos   position in the sequence
+     * @param p     config
+     * @param s     run state
+     * @param w     weights
+     */
+    private static void transformerCPU(int token, int pos, Config p, RunState s, TransformerWeights w) {
         // a few convenience variables
         final int dim = p.dim;
         int kv_dim = (p.dim * p.n_kv_heads) / p.n_heads;
@@ -79,8 +73,8 @@ public class Run {
         // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
             // attention rmsnorm
-//            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            SumOfSquares.call(s.tmp1, s.x, dim);
+            // rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
+            RootMeanSquare.call(s.tmp1, s.x, dim);
 
             WeightNormalizeAndScale.callI8(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
@@ -90,23 +84,23 @@ public class Run {
             MatMul.callI8(s.v, s.xb, w.l_wv, l * dim * kv_dim, dim, kv_dim);
 
             // RoPE relative positional encoding: complex-valued rotate q and k by freq_cis in each head
-            ApplyRope.call(s.q, s.k, pos, dim, kv_dim, head_size);
+            ApplyRope.call(s.q, s.k, pos, dim, kv_dim);
 
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
 
-//            float* key_cache_row = s->key_cache + loff + pos * kv_dim;
-//            memcpy(key_cache_row, s->k, kv_dim * sizeof(*key_cache_row));
+            // float* key_cache_row = s->key_cache + loff + pos * kv_dim;
+            // memcpy(key_cache_row, s->k, kv_dim * sizeof(*key_cache_row));
             System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
 
-//            float* value_cache_row = s->value_cache + loff + pos * kv_dim;
-//            memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
+            // float* value_cache_row = s->value_cache + loff + pos * kv_dim;
+            // memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
             System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
 
             // multihead attention. iterate over all heads in parallel
             IntStream.range(0, p.n_heads).parallel().forEach(h -> {
                 // get the query vector for this head
-//                float*q = s -> q + h * head_size;
+                // float*q = s -> q + h * head_size;
                 int queryIndex = h * head_size;
                 // attention scores for this head
                 int attentionIndex = h * p.seq_len;
@@ -119,10 +113,10 @@ public class Run {
                         kv_dim, queryIndex, pos, head_size);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
-//                softmax(s.att, attentionIndex, pos + 1);
+                // softmax(s.att, attentionIndex, pos + 1);
 
                 // find max value (for numerical stability)
-//                    FindMax.call(s.tmp1, maxIndex, s.att, attentionIndex, pos + 1);
+                // FindMax.call(s.tmp1, maxIndex, s.att, attentionIndex, pos + 1);
 
                 // exp and sum
                 ExpSumNormalize.call(s.att, s.tmp1, maxIndex, attentionIndex, pos + 1);
@@ -141,10 +135,10 @@ public class Run {
             Accum.call(s.x, s.xb2, dim);
 
             // ffn rmsnorm
-//            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
+            // rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-//            MemZeroFloat.call(s.tmp1, 0, 1);
-            SumOfSquares.call(s.tmp1, s.x, dim);
+            // MemZeroFloat.call(s.tmp1, 0, 1);
+            RootMeanSquare.call(s.tmp1, s.x, dim);
             WeightNormalizeAndScale.callI8(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
@@ -164,15 +158,30 @@ public class Run {
         } // layers
 
         // final rmsnorm
-//        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-//        MemZeroFloat.call(s.tmp1, 0, 1);
-        SumOfSquares.call(s.tmp1, s.x, dim);
+        // rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
+        // MemZeroFloat.call(s.tmp1, 0, 1);
+        RootMeanSquare.call(s.tmp1, s.x, dim);
         WeightNormalizeAndScale.callI8(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
         // classifier into logits
         MatMul.callFP32(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
     }
 
+    /**
+     * Implements CPU and CUDA transformer. Logic runs on CPU only, but each kernel is run both on
+     * CPU and CUDA and the results are compared and an exception is thrown if the results deviate
+     * more than a kernel specific threshold.
+     * <p>
+     * This method is 100x slower, due to excessive copying between CPU and GPU devices. It is
+     * intended only for validation of equivalent results between CPU and CUDA implementations.
+     *
+     * @param token   current token
+     * @param pos     position in the sequence
+     * @param p       config
+     * @param s       run state
+     * @param w       weights
+     * @param context execution context
+     */
     private static void transformerTest(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
         // a few convenience variables
         final int dim = p.dim;
@@ -200,8 +209,8 @@ public class Run {
             }
 
             // attention rmsnorm
-//            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
-            cuda.sumOfSquares.test(s.tmp1, s.x, dim);
+            // rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
+            cuda.rootMeanSquare.test(s.tmp1, s.x, dim);
 
             cuda.weightNormalizeAndScale.testI8(s.xb, s.x, w.l_rms_att_weight, l * dim, s.tmp1, dim);
 
@@ -216,19 +225,19 @@ public class Run {
             // save key,value at this time step (pos) to our kv cache
             int loff = l * p.seq_len * kv_dim; // kv cache layer offset for convenience
 
-//            float* key_cache_row = s->key_cache + loff + pos * kv_dim;
-//            memcpy(key_cache_row, s->k, kv_dim * sizeof(*key_cache_row));
+            // float* key_cache_row = s->key_cache + loff + pos * kv_dim;
+            // memcpy(key_cache_row, s->k, kv_dim * sizeof(*key_cache_row));
             System.arraycopy(s.k, 0, s.l_key_cache, loff + pos * kv_dim, kv_dim);
 
-//            float* value_cache_row = s->value_cache + loff + pos * kv_dim;
-//            memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
+            // float* value_cache_row = s->value_cache + loff + pos * kv_dim;
+            // memcpy(value_cache_row, s->v, kv_dim * sizeof(*value_cache_row));
             System.arraycopy(s.v, 0, s.l_value_cache, loff + pos * kv_dim, kv_dim);
 
             // multihead attention. iterate over all heads
             int h;
             for (h = 0; h < p.n_heads; h++) {
                 // get the query vector for this head
-//                float*q = s -> q + h * head_size;
+                // float*q = s -> q + h * head_size;
                 int queryIndex = h * head_size;
                 // attention scores for this head
                 int attentionIndex = h * p.seq_len;
@@ -241,11 +250,11 @@ public class Run {
                         kv_dim, queryIndex, pos, head_size);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
-//                softmax(s.att, attentionIndex, pos + 1);
+                // softmax(s.att, attentionIndex, pos + 1);
 
                 // exp and sum
                 // redundant
-//                cuda.memZeroFloat.test(s.tmp2, 0, 1);
+                // cuda.memZeroFloat.test(s.tmp2, 0, 1);
                 cuda.expSumNormalize.test(s.att, s.tmp1, maxIndex, attentionIndex, pos + 1);
 
                 // weighted sum of the values, store back into xb
@@ -262,9 +271,9 @@ public class Run {
             cuda.accum.test(s.x, s.xb2, dim);
 
             // ffn rmsnorm
-//            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
+            // rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            cuda.sumOfSquares.test(s.tmp1, s.x, dim);
+            cuda.rootMeanSquare.test(s.tmp1, s.x, dim);
             cuda.weightNormalizeAndScale.testI8(s.xb, s.x, w.l_rms_ffn_weight, l * dim, s.tmp1, dim);
 
             // Now for FFN in PyTorch we have: self.w2(F.silu(self.w1(x)) * self.w3(x))
@@ -284,15 +293,24 @@ public class Run {
         } // layers
 
         // final rmsnorm
-//        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        cuda.sumOfSquares.test(s.tmp1, s.x, dim);
+        // rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
+        cuda.rootMeanSquare.test(s.tmp1, s.x, dim);
         cuda.weightNormalizeAndScale.testI8(s.x, s.x, w.rms_final_weight, 0, s.tmp1, dim);
 
         // classifier into logits
         cuda.matMul.testFP32(s.logits, s.x, w.wcls, 0, p.dim, p.vocab_size);
-//        log(pos, "s.logits", s.logits);
     }
 
+    /**
+     * Implements CUDA only transformer for one or multiple GPU devices. Layers are allocated across GPUs
+     * and run state is propagated to the next GPU. This allows for models to use total of available VRAM.
+     *
+     * @param token current token
+     * @param pos   position in the sequence
+     * @param p     config
+     * @param s     run state
+     * @param w     weights
+     */
     private static void transformerCUDA(int token, int pos, Config p, RunState s, TransformerWeights w, Context context) {
         // a few convenience variables
         final int dim = p.dim;
@@ -340,11 +358,8 @@ public class Run {
         Pointer wclsCU = w.wclsCU[dev];
 
         // copy the token embedding into x
-        cuda.copyFloatsFromDeviceToDevice(0, token_embedding_tableCU, token * dim,
+        cuda.copyFloatsFromDeviceToDevice(0, token_embedding_tableCU, (long) token * dim,
                 xCU, 0, dim);
-
-        // pluck out the "pos" row of freq_cis_real and freq_cis_imag
-        int freq_cis_imag_row = pos * head_size / 2;
 
         // forward all the layers
         for (int l = 0; l < p.n_layers; l++) {
@@ -397,9 +412,9 @@ public class Run {
             }
 
             // attention rmsnorm
-//            rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
+            // rmsnorm(s.xb, s.x, w.l_rms_att_weight, layer * dim, dim);
 
-            cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
+            cuda.rootMeanSquare.call(0, tmp1CU, xCU, dim);
 
             cuda.weightNormalizeAndScale.callI8(
                     0, xbCU, xCU, l_rms_att_weightCU, l * dim, tmp1CU, dim);
@@ -430,12 +445,10 @@ public class Run {
             cuda.synchronizeStream(1);
 
             // multihead attention. iterate over all heads
-            // CountDownLatch latch = new CountDownLatch(p.n_heads);
-            int maxStream = 0;
             int h;
             for (h = 0; h < p.n_heads; h++) {
                 // get the query vector for this head
-//                float*q = s -> q + h * head_size;
+                // float*q = s -> q + h * head_size;
                 int queryIndex = h * head_size;
                 // attention scores for this head
                 int attentionIndex = h * p.seq_len;
@@ -450,7 +463,7 @@ public class Run {
                         attentionIndex, keyBase, kv_dim, queryIndex, pos, head_size);
 
                 // softmax the scores to get attention weights, from 0..pos inclusively
-//                softmax(s.att, attentionIndex, pos + 1);
+                // softmax(s.att, attentionIndex, pos + 1);
 
                 // exp and sum
                 cuda.expSumNormalize.call(streamId, attCU, tmp1CU, maxIndex, attentionIndex, pos + 1);
@@ -471,10 +484,9 @@ public class Run {
             cuda.accum.call(0, xCU, xb2CU, dim);
 
             // ffn rmsnorm
-//            rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
+            // rmsnorm(s.xb, s.x, w.l_rms_ffn_weight, layer * dim, dim);
 
-            // todo zzz create AccumSumOfSquares that combines Accum and SumOfSquares
-            cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
+            cuda.rootMeanSquare.call(0, tmp1CU, xCU, dim);
             cuda.weightNormalizeAndScale.callI8(0, xbCU, xCU, l_rms_ffn_weightCU, l * dim, tmp1CU, dim);
 
             cuda.synchronizeStream(0);
@@ -497,47 +509,12 @@ public class Run {
         } // layers
 
         // final rmsnorm
-//        rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
-        cuda.sumOfSquares.call(0, tmp1CU, xCU, dim);
+        // rmsnorm(s.x, s.x, w.rms_final_weight, 0, dim);
+        cuda.rootMeanSquare.call(0, tmp1CU, xCU, dim);
         cuda.weightNormalizeAndScale.callI8(0, xCU, xCU, rms_final_weightCU, 0, tmp1CU, dim);
 
         // classifier into logits, and send in OUTPUT_STREAM
         cuda.matMul.callFP32(0, logitsCU, xCU, wclsCU, p.dim, p.vocab_size);
-    }
-
-    private static void log(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
-        float[] hostArray = new float[size];
-        cuda.synchronizeDevice();
-        cuda.copyFromDeviceToHost(0, pointer, hostArray.length, hostArray);
-        cuda.synchronizeDevice();
-        log(pos, name, hostArray);
-    }
-
-    private static void log(int pos, String name, float[] hostArray) {
-        System.out.println("START LOG pos " + pos + " " + name + "------------------------------------------------------------------");
-        for (int i = 0; i < hostArray.length; i++) {
-            System.out.print(String.format("%4d", i) + "\t" + String.format("%.3f", hostArray[i]) + "\t");
-            if (i % 10 == 9) {
-                System.out.println();
-            }
-        }
-        if (hostArray.length % 10 != 9) {
-            System.out.println();
-        }
-        System.out.println("END LOG pos " + pos + " " + name + "------------------------------------------------------------------");
-    }
-
-    private static void summarize(int pos, String name, ContextCUDA cuda, Pointer pointer, int size) {
-        float[] hostArray = new float[size];
-        cuda.synchronizeDevice();
-        cuda.copyFromDeviceToHost(0, pointer, hostArray.length, hostArray);
-        cuda.synchronizeDevice();
-        summarize(pos, name, hostArray);
-    }
-
-    private static void summarize(int pos, String name, float[] a) {
-        String crc32 = crc32(a);
-        System.out.println("\nSUMMARY pos " + pos + " " + name + " " + crc32);
     }
 
 // ----------------------------------------------------------------------------
@@ -545,21 +522,6 @@ public class Run {
 
     private static long time() {
         return System.currentTimeMillis();
-    }
-
-    private static String crc32(float[] values) {
-        CRC32 crc = new CRC32();
-
-        // Use ByteBuffer to convert float to byte array
-        ByteBuffer buffer = ByteBuffer.allocate(4 * values.length); // each float is 4 bytes
-        for (float value : values) {
-            buffer.putFloat(value);
-        }
-
-        byte[] byteRepresentation = buffer.array();
-        crc.update(byteRepresentation);
-
-        return Long.toHexString(crc.getValue());
     }
 
 // ----------------------------------------------------------------------------
@@ -676,7 +638,7 @@ public class Run {
                             logits[q] /= commandLine.getTemperature();
                         }
                         // apply softmax to the logits to get the probabilities for next token
-//                    softmax(state.logits, 0, config.vocab_size);
+                        // softmax(state.logits, 0, config.vocab_size);
 
                         // find max value (for numerical stability)
                         float[] max = {0f};

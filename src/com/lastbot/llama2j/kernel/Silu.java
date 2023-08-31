@@ -9,24 +9,28 @@ import java.util.Arrays;
 
 import static jcuda.driver.JCudaDriver.cuLaunchKernel;
 
+/**
+ * Kernel: implements activation as SwiGLU
+ * <p>
+ *     for (int i = 0; i < hidden_dim; i++) {
+ *          float val = s->hb[i];
+ *          // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
+ *          val *= (1.0f / (1.0f + expf(-val)));
+ *          // elementwise multiply with w3(x)
+ *          val *= s->hb2[i];
+ *          s->hb[i] = val;
+ *     }
+ * <p>
+ * CPU version implements partial lookup table with liner interpolation
+ * for EXP values for performance.
+ *
+ */
 public class Silu extends Kernel {
     public static final int BLOCK_SIZE = 64;
     public static final boolean LOOKUP_EXP = true;
 
     private final ContextCUDA cuda;
     private final CUfunction kernel;
-
-    // Implements
-
-    //    // SwiGLU non-linearity
-    //        for (int i = 0; i < hidden_dim; i++) {
-    //        float val = s->hb[i];
-    //        // silu(x)=x*σ(x), where σ(x) is the logistic sigmoid
-    //        val *= (1.0f / (1.0f + expf(-val)));
-    //        // elementwise multiply with w3(x)
-    //        val *= s->hb2[i];
-    //        s->hb[i] = val;
-    //    }
 
     public Silu(ContextCUDA cuda) {
         super(cuda, "silu");
@@ -44,7 +48,6 @@ public class Silu extends Kernel {
         Thread.ofVirtual().start(() ->
         {
             for (int i = 0; i < TABLE_SIZE; i++) {
-                // Assuming MAX_LOOK_UP_ABS_VALUE <= hb[i] <= MAX_LOOK_UP_ABS_VALUE
                 double val = (i / (double) TABLE_SIZE) * (2.0 * MAX_LOOK_UP_ABS_VALUE) - MAX_LOOK_UP_ABS_VALUE;
                 expTable[i] = (float) (1.0f / (1.0f + Math.exp((-val))));
             }
@@ -69,10 +72,9 @@ public class Silu extends Kernel {
         for (int i = 0; i < hidden_dim; i++) {
             hb[i] *= lookupExp(hb[i]) * hb2[i];
         }
-        // orig
-//        for (int i = 0; i < hidden_dim; i++) {
-//            hb[i] *= (float) (1.0f / (1.0f + Math.exp((-hb[i])))) * hb2[i];
-//        }
+        // for (int i = 0; i < hidden_dim; i++) {
+        // hb[i] *= (float) (1.0f / (1.0f + Math.exp((-hb[i])))) * hb2[i];
+        // }
     }
 
     public void test(float[] hb, float[] hb2, int hidden_dim) {

@@ -5,6 +5,16 @@ import jcuda.Sizeof;
 
 import java.io.Closeable;
 
+/**
+ * Class to manage run state of transformer.
+ * <p>
+ * Please see
+ * <p>
+ * <a href="https://arxiv.org/pdf/2307.09288.pdf">Llama 2: Open Foundation and Fine-Tuned Chat Models</a>
+ * <p>
+ * <a href="https://github.com/karpathy/llama2.c">Reference C implementation</a>
+ *
+ */
 public class RunState implements Closeable {
     // current wave of activations
     float[] x; // activation at current time stamp (dim,)
@@ -158,6 +168,6 @@ public class RunState implements Closeable {
 
     @Override
     public void close() {
-        // rely on context.close
+        // nothing, rely on context.close
     }
 }
