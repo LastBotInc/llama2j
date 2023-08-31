@@ -39,7 +39,7 @@ loading time.
 | Command                                                                                                                | Configuration 1 | Configuration 2 | Configuration 3 |
 |------------------------------------------------------------------------------------------------------------------------|-----------------|-----------------|-----------------|
 | llama2j --mode CPU --checkpoint Llama-2-7b-chat.bin                                                                    | 6.55 tok/s      | TBD             | TBD |
-| llama2j --mode CUDA --checkpoint Llama-2-7b-chat.bin                                                                   | 19.77 tok/s     | 20.89 tok/s     | TBD |
+| llama2j --mode CUDA --checkpoint Llama-2-7b-chat.bin                                                                   | 19.77 tok/s     | 20.98 tok/s     | TBD |
 | llama2.c compiled as make runomp and run as ./run lLlama-2-7b-chat.bin -t 1.0 -n 256 -i "One day, Lily met a Shoggoth" | 12.0 tok/s      | TBD             | TBD|
 
 The duration of a model checkpoint loading depends on if the model is being loaded for the first
