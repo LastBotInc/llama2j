@@ -1,7 +1,5 @@
 package com.lastbot.llama2j;
 
-import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
-
 import java.nio.ByteBuffer;
 import java.util.Random;
 
@@ -15,16 +13,16 @@ import java.util.Random;
  * accordingly as they contain efficient implementation of decoding quantification with
  * the operation in the same kernel. This supports for good performance.
  * <p>
- *  MatMul.callI8()
- *  MatMul.callI8Single()
- *  MatMul.callI8GroupAligns()
- *  MatMul.callI8GroupDoesNotAlign()
- *  MatMul.callI8(int streamId,...)
- *  MatMul.createI8() - CUDA kernel that performs decoding and matrix vector multiplication
+ * MatMul.callI8()
+ * MatMul.callI8Single()
+ * MatMul.callI8GroupAligns()
+ * MatMul.callI8GroupDoesNotAlign()
+ * MatMul.callI8(int streamId,...)
+ * MatMul.createI8() - CUDA kernel that performs decoding and matrix vector multiplication
  * <p>
- *  WeightNormalizeAndScale.callI8()
- *  WeightNormalizeAndScale.callI8(int streamId,...)
- *  WeightNormalizeAndScale.create() - CUDA kernel that performs decoding and calculation
+ * WeightNormalizeAndScale.callI8()
+ * WeightNormalizeAndScale.callI8(int streamId,...)
+ * WeightNormalizeAndScale.create() - CUDA kernel that performs decoding and calculation
  *
  * @param groupSize group size
  * @param bits      how many bits are used to encode a single FP32 value
@@ -129,7 +127,7 @@ public record Quant(int groupSize, int bits) {
         byteBuffer.get(encoded);
         byteBuffer.rewind();
 
-        Random random = new XoRoShiRo128PlusRandom(101);
+        Random random = new Random(101);
         int startIndex;
         int size;
         int[] floatIndex = new int[1];

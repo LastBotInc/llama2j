@@ -1,7 +1,5 @@
 package com.lastbot.llama2j;
 
-import it.unimi.dsi.util.XoRoShiRo128PlusRandom;
-
 import java.util.Arrays;
 import java.util.Random;
 
@@ -24,7 +22,7 @@ public class Sampler {
     }
 
     public Sampler(long rngSeed, int vocab_size) {
-        this.random = new XoRoShiRo128PlusRandom(rngSeed);
+        this.random = new Random(rngSeed);
 
         probIndex = new ProbIndex[vocab_size];
         for (int i = 0; i < vocab_size; i++) {
