@@ -1,7 +1,5 @@
 #!/bin/bash
-sudo apt install tuned -y
 sudo tuned-adm profile throughput-performance
-sudo apt-get install linux-tools-6.2.0-26-generic linux-cloud-tools-6.2.0-26-generic -y
 sudo cpupower -c all frequency-set -g performance
 echo 10000 | sudo tee /proc/sys/kernel/sched_cfs_bandwidth_slice_us
 echo 0 | sudo tee /proc/sys/kernel/sched_child_runs_first
