@@ -32,6 +32,7 @@ public class Run {
      * quant cache files to.
      */
     private static final String MODELS_DIRECTORY = "models";
+    private static final String TOKENIZER_DIRECTORY = "tokenizer";
 
 
     /**
@@ -604,7 +605,7 @@ public class Run {
         }
 
         Tokenizer tokenizer = new Tokenizer(
-                MODELS_DIRECTORY + File.separator + commandLine.getTokenizer(), p.vocab_size);
+                TOKENIZER_DIRECTORY + File.separator + commandLine.getTokenizer(), p.vocab_size);
 
         // process the prompt, if any
         int[] prompt_tokens = tokenizer.bpe_encode(commandLine.getPrompt());
