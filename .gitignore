@@ -28,7 +28,7 @@ bin/
 ### Mac OS ###
 .DS_Store
 
-models
+/models/*.bin
 
 .attach_pid*
 
