@@ -528,6 +528,15 @@ public class Run {
 // sampling can be done in a few ways: greedy argmax, sampling, top-p sampling
 
     public static void main(String[] args) {
+        int numberOfThreads = Runtime.getRuntime().availableProcessors();
+        if (numberOfThreads >= 64) {
+            numberOfThreads += 4;
+        } else if (numberOfThreads >= 32) {
+            numberOfThreads += 2;
+        }
+        System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism",
+                Integer.toString(numberOfThreads));
+
         CommandLine commandLine = new CommandLine(args);
 
         Mode mode = commandLine.getMode();
