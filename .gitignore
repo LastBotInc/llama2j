@@ -32,7 +32,6 @@ models
 
 .attach_pid*
 
-src/cuda/cmake-build-debug
-src/cuda/*.cubin
-src/cuda/gen_*.cu
-
+/target/classes/
+/src/main/java/cuda/gen_*.cu
+/src/main/java/cuda/*.cubin
