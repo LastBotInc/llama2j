@@ -47,6 +47,10 @@ public class LayerAllocation {
             this.firstLayer = null;
             this.lastLayer = null;
         } else {
+            if (gpuMem == null) {
+                throw new RuntimeException("Mode " + mode + " but no GPU devices defined. See parameter --gpuMem. Otherwise try --mode CPU");
+            }
+
             this.deviceCount = gpuMem.length;
 
             long staticSize = deviceCount * staticBytes;
