@@ -36,3 +36,4 @@ bin/
 /target/
 /src/main/java/cuda/gen_*.cu
 /src/main/java/cuda/*.cubin
+/dependency-reduced-pom.xml
