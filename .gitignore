@@ -29,6 +29,7 @@ bin/
 .DS_Store
 
 /models/*.bin
+/models/*.quant
 
 .attach_pid*
 
