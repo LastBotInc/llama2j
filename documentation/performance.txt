@@ -536,32 +536,7 @@ Run-loop to IntStream
 achieved tok/s: 6.46, 6.45, 6.45
 
 - BEST
-group size: 32
-achieved tok/s:
-
-group size: 64
-achieved tok/s: 6.08
-
-group size: 128
-achieved tok/s: 6.44
-
-group size: 192
-achieved tok/s: 4.25
-
-group size: 256
-achieved tok/s: 6.47
-
-group size: 368
-achieved tok/s: 4.11
-
-group size: 512
-achieved tok/s: 6.29
-
-group size: 1024
-achieved tok/s: 5.62
-
-
-
+achieved tok/s: 6.52
 
 ---------------- llama2.c ----------------
 #make runomp
