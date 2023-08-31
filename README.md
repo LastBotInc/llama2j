@@ -71,7 +71,12 @@ that llama2j can use.
 
 sudo apt-get update
 sudo apt-get upgrade
-sudo apt-get install build-essential git cmake python3 clang libomp-dev git-lfs python3-pip maven tuned linux-tools-6.2.0-26-generic linux-cloud-tools-6.2.0-26-generic -y
+sudo apt-get install build-essential git cmake python3 clang libomp-dev git-lfs python3-pip maven tuned \
+linux-tools-6.2.0-26-generic linux-cloud-tools-6.2.0-26-generic \
+linux-tools-6.2.0-31-generic linux-cloud-tools-6.2.0-31-generic \
+linux-tools-generic \
+linux-cloud-tools-generic \
+-y
 git config --global credential.helper store
 pip install --upgrade huggingface_hub
 pip install transformers
@@ -136,6 +141,19 @@ is not an error condition. You have your drivers and are good to go.
 git clone https://github.com/LastBotInc/llama2j.git
 cd llama2j
 mvn clean package
+```
+
+### Set up your system for performance
+
+On Ubuntu, go to directory "llama2j/environment". Review the script setup_amd.sh. The script sets system-wide
+parameters for better performance. It is geared towards AMD processors, but likely will benefit Intel as well.
+
+NOTE: the script sets system-wide kernel parameters permanently, so in case you are using other than disposable
+instance, please review the settings carefully, and remove any setting you are not comfortable with.
+
+```console
+cd llama2j/environment
+sh ./setup_amd.sh
 ```
 
 ### Download test model
