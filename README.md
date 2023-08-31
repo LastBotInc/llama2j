@@ -22,9 +22,10 @@ Features:
 - CPU and CUDA are identical and validatable against each other
 
 Tested on:
+- Ubuntu 22.04.02 and 22.04.03
+- Windows 11 XXX
 - LLama 7B model and smaller models
 - CPU and GPU
-- Windows and Linux
 - Java 20
 - CUDA 11.2
 - JCuda 11.2.0
@@ -55,7 +56,7 @@ The test system configurations are:
 |-----------------|-----------------------------------------------------------------------------------------------------------|
 | Configuration 1 | Ubuntu 22.04.3, MZ33-AR0-000, AMD EPYC 9374F 32-core processor, 4 * Nvidia 4090, 368GB 4800 DDR5          |
 | Configuration 2 | Ubuntu 22.04.3, ROG CROSSHAIR X670E EXTREME, AMD 9750x 16-core processor, 1 * Nvidia 4090, 64GB 4800 DDR5 |
-| Configuration 3 | s                                                                                                         | 
+| Configuration 3 | TBD                                                                                                       | 
 
 ## Quick and Easy Installation
 
@@ -86,32 +87,10 @@ export PATH=/usr/lib/jvm/jdk-20/bin/:$PATH
 java --version
 ```
 
-### Download and install llama2j
-
-```console
-git clone https://github.com/LastBotInc/llama2j.git
-cd llama2j
-mvn clean package
-```
-
-### Download test model
-
-Get a 15M test model:
-
-```console
-cd models
-wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
-```
-
-### Give it a spin!
-
-```console
-./run.sh --mode CPU --checkpoint stories15M.bin --prompt "One day, Lily met a Shoggoth"
-```
-
 ### Set up CUDA
 
-First check that you have NVIDIA drivers installed.
+First check that you have NVIDIA drivers installed. If not, download and install them from nvidia site. And Good luck!
+
 ```console
 nvidia-smi 
 ```
@@ -148,6 +127,34 @@ sudo sh cuda_12.0.0_525.60.13_linux.run
 
 Installer will complain "***WARNING: Incomplete installation!" which
 is not an error condition. You have your drivers and are good to go.
+
+
+
+### Download and install llama2j
+
+```console
+git clone https://github.com/LastBotInc/llama2j.git
+cd llama2j
+mvn clean package
+```
+
+### Download test model
+
+Get a 15M test model:
+
+```console
+cd models
+wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
+```
+
+### Give it a spin!
+
+```console
+./run.sh --mode CPU --checkpoint stories15M.bin --prompt "One day, Lily met a Shoggoth"
+```
+
+zzz
+
 
 NOTE: configure the --gpuMem according to how much GPU memory you want to allocate
 on each device. For small models (up to 7B) configuring only one device is sufficient
