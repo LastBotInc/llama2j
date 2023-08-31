@@ -11,9 +11,8 @@ import java.util.regex.Pattern;
 
 /**
  * Byte pair encoding (BPE) tokenizer with encode and decode methods.
- *
+ * <p>
  * NOTE: assumes tokenizer file uses UTF8.
- *
  */
 public class Tokenizer implements Closeable {
     private static final Charset CHARSET = StandardCharsets.UTF_8;
@@ -80,9 +79,8 @@ public class Tokenizer implements Closeable {
                     LLogger.debug("[" + i + "] " + String.format("%,.5f", vocab_scores[i]) + " |" + vocab[i] + "|");
                 }
             }
-        } catch (
-                IOException e) {
-            System.exit(1);
+        } catch (IOException e) {
+            throw new RuntimeException("Cannot read tokenizer file " + tokenizerFilePath, e);
         }
         Arrays.sort(sorted_vocab);
 
@@ -180,8 +178,7 @@ public class Tokenizer implements Closeable {
                 LLogger.error("unexpected", e);
                 output = null;
             }
-        }
-        else {
+        } else {
             output = token_str;
         }
         LLogger.debug("output |" + output + "|");
