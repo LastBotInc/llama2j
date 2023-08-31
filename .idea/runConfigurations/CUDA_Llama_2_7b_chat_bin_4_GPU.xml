@@ -7,7 +7,7 @@
     <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
     <module name="llama2j" />
     <option name="PROGRAM_PARAMETERS" value="--mode CUDA --checkpoint Llama-2-7b-chat.bin --gpuMem &quot;17,24,24,24&quot;" />
-    <option name="VM_PARAMETERS" value="-XX:MaxInlineSize=1023 -XX:InlineSmallCode=1023 -Xmx127g -XX:+UseZGC -XX:+UseUnalignedLoadStores -XX:+UseXMMForArrayCopy -XX:+UseXMMForObjInit -XX:+UseFPUForSpilling -XX:-UseFastStosb" />
+    <option name="VM_PARAMETERS" value="-Xmx16g" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>

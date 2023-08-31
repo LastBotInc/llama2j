@@ -7,7 +7,7 @@
     <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
     <module name="llama2j" />
     <option name="PROGRAM_PARAMETERS" value="--mode CPU --checkpoint stories15M.bin" />
-    <option name="VM_PARAMETERS" value="-XX:MaxInlineSize=1023 -XX:InlineSmallCode=1023 -Xmx63g -XX:+UseZGC -XX:+UseUnalignedLoadStores -XX:+UseXMMForArrayCopy -XX:+UseXMMForObjInit -XX:+UseFPUForSpilling -XX:-UseFastStosb" />
+    <option name="VM_PARAMETERS" value="-Xmx16g" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>
