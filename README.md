@@ -51,8 +51,8 @@ from the disk, if necessary, quantifying the weights, and transferring the data 
 
 | Command                                                                  | Configuration 1 | Configuration 2 | Configuration 3 |
 |--------------------------------------------------------------------------|-----------------|-----------------|-----------------|
-| Load Llama-2-7b-chat for the first time, quantize, and store quant files | TBD             | TBD             | 38.0 s          |
-| Load Llama-2-7b-chat from cached quant files                             | TBD             | TBD             | 1.7 s           |
+| Load Llama-2-7b-chat for the first time, quantize, and store quant files | TBD             | 27.4 s          | 38.0 s          |
+| Load Llama-2-7b-chat from cached quant files                             | TBD             | 1.3 s           | 1.7 s           |
 
 The test system configurations are:
 
