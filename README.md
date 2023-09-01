@@ -42,8 +42,8 @@ NOTE: llama2.c has been compiled as 'make runomp' for the fastest performance.
 |------------------------------------------------------|-----------------|---------------|----------------|
 | llama2j --mode CPU --checkpoint Llama-2-7b-chat.bin  | 6.6 tok/s       | 4.0 tok/s     | 1.8 tok/s      |
 | llama2j --mode CUDA --checkpoint Llama-2-7b-chat.bin | 20.9 tok/s      | 21.0 tok/s    | 17.0 tok/s     |
-| llama2.c (OMP_NUM_THREADS=32)                        | TBD             | 2.3 tok/s     | -              |
-| llama2.c (OMP_NUM_THREADS=64)                        | TBD             | 2.2 tok/s     | -              |
+| llama2.c (OMP_NUM_THREADS=32)                        | 12.0 tok/s      | 2.3 tok/s     | -              |
+| llama2.c (OMP_NUM_THREADS=64)                        | 9.5 tok/s       | 2.2 tok/s     | -              |
 
 The duration of a model checkpoint loading depends on if the model is being loaded for the first
 time, or if it already has been processed and cached. The time includes allocating memory, loading weighs
@@ -51,14 +51,14 @@ from the disk, if necessary, quantifying the weights, and transferring the data 
 
 | Command                                                                  | Configuration 1 | Configuration 2 | Configuration 3 |
 |--------------------------------------------------------------------------|-----------------|-----------------|-----------------|
-| Load Llama-2-7b-chat for the first time, quantize, and store quant files | TBD             | 27.4 s          | 38.0 s          |
-| Load Llama-2-7b-chat from cached quant files                             | TBD             | 1.3 s           | 1.7 s           |
+| Load Llama-2-7b-chat for the first time, quantize, and store quant files | 15.3 s          | 27.4 s          | 38.0 s          |
+| Load Llama-2-7b-chat from cached quant files                             | 0.8 s           | 1.3 s           | 1.7 s           |
 
 The test system configurations are:
 
 | Configuration   | System                                                                                                              |
 |-----------------|---------------------------------------------------------------------------------------------------------------------|
-| Configuration 1 | Ubuntu 22.04.3, MZ33-AR0-000, AMD EPYC 9374F 32-core processor, 4 * Nvidia 4090, 368GB 4800 DDR5                    |
+| Configuration 1 | Ubuntu 22.04.3, MZ33-AR0-000, AMD EPYC 9374F 32-core processor, (1 of 4) * Nvidia 4090, 368GB 4800 DDR5             |
 | Configuration 2 | Ubuntu 22.04.3, ROG CROSSHAIR X670E EXTREME, AMD 9750x 16-core processor, 1 * Nvidia 4090, 64GB 4800 DDR5           |
 | Configuration 3 | Windows 11 Pro Build 22621, ROG MAXIMUS Z790 APEX, Intel 13900KS 24-core processor, 1 * Nvidia 4090, 32BG 7600 DDR5 |
 
@@ -166,7 +166,7 @@ git clone https://github.com/LastBotInc/llama2j.git
 cd .\IdeaProjects\llama2j\models
 ```
 
-Download the test model file
+Download a test model file
 
 ```console
 curl https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin -OutFile stories15M.bin
@@ -212,7 +212,7 @@ cd llama2j/environment
 sh ./setup_amd.sh
 ```
 
-## Download test model
+## Download a test model
 
 Get a 15M test model:
 
