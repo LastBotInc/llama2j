@@ -1,37 +1,37 @@
 # llama2j
 
-Project is based on https://github.com/karpathy/llama2.c
+The llama2j project is based on https://github.com/karpathy/llama2.c
 
 This is a pure Java implementation of LLama 2 inference, without any dependencies.
 
-In addition, we implement CUDA version of the same, where the transformer is implemented
-as a number of kernels. Java code runs the kernels on GPU using JCuda.
+In addition, we implement CUDA version, where the transformer is implemented
+as a number of CUDA kernels. Java code runs the kernels on GPU using JCuda.
 
 The purpose of this project is to provide good-performance inference for LLama 2 models
 that can run anywhere, and integrate easily with Java code. We desire to enable the LLM
-locally available for backend code, and to scale horizontally to more nodes that each
-can include both backend logic and local LLM inference.
+locally available for backend code. LLM becomes a seamless and integrated part
+of application backend functionality, and can be scaled together with the backend.
 
 Features:
-- < 1 second startup time for LLama 7B model
+- 4 second startup time for LLama 7B model
 - CPU support
-- Single or multiple GPU support
+- Single or multiple Nvidia GPU support
 - I8 quantization of weights on the fly
 - Caching of I8 weights
-- Activations are FP32, so this is W8A32 quantization
-- CPU and CUDA are identical and validatable against each other
+- Activations are FP32 (this is W8A32 quantization)
+- CPU and CUDA implementations are identical and validatable against each other
 
 Tested on:
 - Ubuntu 22.04.02 and 22.04.03
-- Windows 11 XXX
+- Windows 11 Version 10.0.22621 Build 22621
 - LLama 7B model and smaller models
-- CPU and GPU
+- Intel and AMD CPUs
 - Java 20
 - CUDA 11.2
 - JCuda 11.2.0
 - 1-4x RTX 4090
 
-## Performance
+# Performance
 
 Tokens per second is printed out at the end of the run, and it excludes model checkpoint
 loading time.
@@ -42,8 +42,8 @@ NOTE: llama2.c has been compiled as 'make runomp' for the fastest performance.
 |------------------------------------------------------|-----------------|-----------------|-----------------|
 | llama2j --mode CPU --checkpoint Llama-2-7b-chat.bin  | 6.55 tok/s      | 4.02 tok/s      | TBD             |
 | llama2j --mode CUDA --checkpoint Llama-2-7b-chat.bin | 20.89 tok/s     | 20.98 tok/s     | TBD             |
-| llama2.c (OMP_NUM_THREADS=32)                        | TBD             | 2.31 tok/s      | TBD             |
-| llama2.c (OMP_NUM_THREADS=64)                        | TBD             | 2.20 tok/s      | TBD             |
+| llama2.c (OMP_NUM_THREADS=32)                        | TBD             | 2.31 tok/s      | -               |
+| llama2.c (OMP_NUM_THREADS=64)                        | TBD             | 2.20 tok/s      | -               |
 
 The duration of a model checkpoint loading depends on if the model is being loaded for the first
 time, or if it already has been processed and cached. The time includes allocating memory, loading weighs
@@ -56,15 +56,17 @@ from the disk, if necessary, quantifying the weights, and transferring the data 
 
 The test system configurations are:
 
-| Configuration   | System                                                                                                    |
-|-----------------|-----------------------------------------------------------------------------------------------------------|
-| Configuration 1 | Ubuntu 22.04.3, MZ33-AR0-000, AMD EPYC 9374F 32-core processor, 4 * Nvidia 4090, 368GB 4800 DDR5          |
-| Configuration 2 | Ubuntu 22.04.3, ROG CROSSHAIR X670E EXTREME, AMD 9750x 16-core processor, 1 * Nvidia 4090, 64GB 4800 DDR5 |
-| Configuration 3 | TBD                                                                                                       | 
+| Configuration   | System                                                                                                              |
+|-----------------|---------------------------------------------------------------------------------------------------------------------|
+| Configuration 1 | Ubuntu 22.04.3, MZ33-AR0-000, AMD EPYC 9374F 32-core processor, 4 * Nvidia 4090, 368GB 4800 DDR5                    |
+| Configuration 2 | Ubuntu 22.04.3, ROG CROSSHAIR X670E EXTREME, AMD 9750x 16-core processor, 1 * Nvidia 4090, 64GB 4800 DDR5           |
+| Configuration 3 | Windows 11 Pro Build 22621, ROG MAXIMUS Z790 APEX, Intel 13900KS 24-core processor, 1 * Nvidia 4090, 32BG 7600 DDR5 |
 
-## Quick and Easy Installation
+# Quick and Easy Installation
 
-### Install dependencies
+For Ubuntu, follow these instructions. For Windows 11, see the section below.
+
+## Install dependencies
 
 This also provides dependencies for using llama2.c for converting models to a llama2.c format
 that llama2j can use.
@@ -96,7 +98,7 @@ export PATH=/usr/lib/jvm/jdk-20/bin/:$PATH
 java --version
 ```
 
-### Set up CUDA
+## Set up CUDA
 
 First check that you have NVIDIA drivers installed. If not, download and install them from nvidia site. And Good luck!
 
@@ -137,9 +139,9 @@ sudo sh cuda_12.0.0_525.60.13_linux.run
 Installer will complain "***WARNING: Incomplete installation!" which
 is not an error condition. You have your drivers and are good to go.
 
+## Download and build llama2j
 
-
-### Download and install llama2j
+On Ubuntu, now everything is ready for cloning and building the project.
 
 ```console
 git clone https://github.com/LastBotInc/llama2j.git
@@ -147,20 +149,70 @@ cd llama2j
 mvn clean package
 ```
 
-### Set up your system for performance
+On Windows, just clone the project.
+
+```console
+git clone https://github.com/LastBotInc/llama2j.git
+```
+
+## Windows 11 quick installation guide
+
+- Install git from https://git-scm.com/download/win
+- Install maven from https://maven.apache.org/download.cgi
+- Open PowerShell Prompt
+- Go to the 'model' subdirectory under 'llama2j' directory, for example
+
+```console
+cd .\IdeaProjects\llama2j\models
+```
+
+Download the test model file
+
+```console
+curl https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin -OutFile stories15M.bin
+```
+CUDA toolkit
+
+- Install Anaconda on Windows
+- Open 'Anaconda Prompt (miniconda3)' from the start menu
+- Install CUDA 12.0 on conda
+
+```console
+conda install cuda -c nvidia/label/cuda-12.0.0
+```
+
+Microsoft C++ compiler
+
+- Install Microsoft Visual Studio or Build Tools.
+- Add Microsoft C++ compiler "cl.exe" into your PATH variable. Location varies, but on the test computer
+it is:
+C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Tools\MSVC\14.36.32532\bin\Hostx64\x64
+
+Now, everything should be ready to build on Windows.
+
+```console
+mvn clean
+mvn package
+```
+
+That's all for Windows. For any further steps, follow the instructions below.
+
+NOTE: Model conversion is only supported under Ubuntu. On Windows you can use WSL.
+
+## Back to Ubuntu, set up your system for performance
 
 On Ubuntu, go to directory "llama2j/environment". Review the script setup_amd.sh. The script sets system-wide
 parameters for better performance. It is geared towards AMD processors, but likely will benefit Intel as well.
 
-NOTE: the script sets system-wide kernel parameters permanently, so in case you are using other than disposable
-instance, please review the settings carefully, and remove any setting you are not comfortable with.
+NOTE: the script sets system-wide kernel parameters permanently. In case you are using anything other than
+a disposable instance, please review the settings carefully, and remove any setting you are not comfortable with.
 
 ```console
 cd llama2j/environment
 sh ./setup_amd.sh
 ```
 
-### Download test model
+## Download test model
 
 Get a 15M test model:
 
@@ -169,14 +221,19 @@ cd models
 wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
 ```
 
-### Give it a spin!
+## Give it a spin on CPU!
 
 ```console
 ./run.sh --mode CPU --checkpoint stories15M.bin --prompt "One day, Lily met a Shoggoth"
 ```
 
-zzz
+On Windows, please use run.cmd.
 
+```console
+run.cmd --mode CPU --checkpoint stories15M.bin --prompt "One day, Lily met a Shoggoth"
+```
+
+## Run for your money on GPU!
 
 NOTE: configure the --gpuMem according to how much GPU memory you want to allocate
 on each device. For small models (up to 7B) configuring only one device is sufficient
@@ -192,9 +249,9 @@ To use 17G of the first CUDA device (0), and 24G on the devices (1), (2) and (3)
 ```console
 ./run.sh --mode CUDA --gpuMem 17,24,24,24 --checkpoint stories15M.bin --prompt "One day, Lily met a Shoggoth"
 ```
-## Take Advantage of Hugging Face LLama2 models
+# Take Advantage of Hugging Face LLama2 models
 
-### Log in to your Hugging Face account
+## Log in to your Hugging Face account
 
 NOTE: if you installed in a virtual environment, change
 the path to huggingface-cli correspondingly.
@@ -210,7 +267,7 @@ and select Y on:
 Add token as git credential? (Y/n) Y
 ```
 
-### Clone llama2.c
+## Clone llama2.c
 
 Clone llama2.c to a separate directory. We need it to convert Hugging Face 
 models to a llama2.c format that llama2j supports natively.
@@ -229,7 +286,7 @@ Install requirements:
 pip install -r requirements.txt
 ```
 
-### Download and convert your favorite LLama 7B based model checkpoints from Hugging Face
+## Download and convert your favorite LLama 7B based model checkpoints from Hugging Face
 
 The example below is for llama-27b-chat model.
 
@@ -267,7 +324,7 @@ The file should be in your llama2j/models directory and likely be 26GB in size. 
 -rw-rw-r-- 1 tero tero 26G Aug 31 14:12 /home/tero/llama2j/models/Llama-2-7b-chat.bin
 ```
 
-### Now, run the model in CUDA.
+## Now, run the model in CUDA.
 
 At the first run, the startup takes ca. 20-30 seconds when the model checkpoint is automatically converted to quant files, which are cached to local files.
 
@@ -275,9 +332,9 @@ At the first run, the startup takes ca. 20-30 seconds when the model checkpoint 
 ./run.sh --mode CUDA --checkpoint Llama-2-7b-chat.bin --gpuMem 17 --prompt "One day, Lily met a Shoggoth"
 ```
 
-## Future development ideas
+# Future development ideas
 
-Feel free to send PRs.
+PRs are welcome!
 
 | Topic                                                       | Work estimate |
 |-------------------------------------------------------------|---------------|
@@ -291,21 +348,21 @@ Feel free to send PRs.
 
 We expect the I4 will cost 5-10% of performance
 (while the memory bandwidth requirement will be reduced, there is slightly
-more computational load). FP32 to FP16 will improve performance slightly.
+more computational load). FP32 to FP16 will improve performance.
 It is hard to estimate how that will interplay together with I4. Multiple
-queries will help to maximize the use of GPU resources, and performance can
-greatly benefit from the larger batch size. When the weights are loaded to
-the shared memory, they can be efficiently applied to multiple queries that
+queries (large batch size) will help to maximize the use of GPU resources,
+and performance can greatly benefit from the larger batch size. When the weights are
+loaded to the shared memory, they can be efficiently applied to multiple queries that
 run in parallel. This may also be the only reasonable way to overcome the
 eventual ultimate memory bandwidth issue. There are other options too, such as
 weight compression (in addition to quantization) but there are substantial
 challenges to optimize the decompression to the speed level it would not
 actually crash performance.
 
-However, as the GPU utilization is already at a good level. Tensor core kernels might accelerate matrix-vector
-multiplication, but the real benefit also requires fragmenting and aligning
-the quantized weights at processing time so that they fit the tensor core
-operations sizes naturally for the selected primitive types.
+Tensor core kernels might accelerate matrix-vector multiplication, but the real
+benefit also requires fragmenting and aligning the quantized weights at processing
+time so that they fit the tensor core operation sizes naturally for the selected
+primitive types.
 
 On a device with 4 * 4090, today this code runs 4 parallel queries each
 at 20 tokens/s, which is already a good speed for many applications,
@@ -314,7 +371,7 @@ total of 200 tokens/s on that platform, and 50 tokens on a single 4090.
 
 Please let us know what do you think!
 
-## What is LastBot
+# What is LastBot
 
 We are building the ultimate conversation machine, which automates
 engagement throughout the customer journey. All communication is thoughtful,
@@ -322,6 +379,6 @@ efficient, and impactful. LastBot always knows how to choose the right words,
 and continuously online-learns from the real-life events to make even better
 choices.
 
-## Contact
+# Contact
 
 tero@lasbot.com
