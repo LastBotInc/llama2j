@@ -2,7 +2,7 @@
 
 The llama2j project is based on https://github.com/karpathy/llama2.c
 
-This is a pure Java implementation of LLama 2 inference, without any dependencies.
+This is a pure Java implementation of standalone LLama 2 inference, without any dependencies.
 
 In addition, we implement CUDA version, where the transformer is implemented
 as a number of CUDA kernels. Java code runs the kernels on GPU using JCuda.
@@ -39,11 +39,11 @@ loading time.
 NOTE: llama2.c has been compiled as 'make runomp' for the fastest performance.
 
 | Command                                              | Configuration 1 | Configuration 2 | Configuration 3 |
-|------------------------------------------------------|-----------------|-----------------|-----------------|
-| llama2j --mode CPU --checkpoint Llama-2-7b-chat.bin  | 6.55 tok/s      | 4.02 tok/s      | TBD             |
-| llama2j --mode CUDA --checkpoint Llama-2-7b-chat.bin | 20.89 tok/s     | 20.98 tok/s     | TBD             |
-| llama2.c (OMP_NUM_THREADS=32)                        | TBD             | 2.31 tok/s      | -               |
-| llama2.c (OMP_NUM_THREADS=64)                        | TBD             | 2.20 tok/s      | -               |
+|------------------------------------------------------|-----------------|---------------|----------------|
+| llama2j --mode CPU --checkpoint Llama-2-7b-chat.bin  | 6.6 tok/s       | 4.0 tok/s     | 1.8 tok/s      |
+| llama2j --mode CUDA --checkpoint Llama-2-7b-chat.bin | 20.9 tok/s      | 21.0 tok/s    | 17.0 tok/s     |
+| llama2.c (OMP_NUM_THREADS=32)                        | TBD             | 2.3 tok/s     | -              |
+| llama2.c (OMP_NUM_THREADS=64)                        | TBD             | 2.2 tok/s     | -              |
 
 The duration of a model checkpoint loading depends on if the model is being loaded for the first
 time, or if it already has been processed and cached. The time includes allocating memory, loading weighs
@@ -51,8 +51,8 @@ from the disk, if necessary, quantifying the weights, and transferring the data 
 
 | Command                                                                  | Configuration 1 | Configuration 2 | Configuration 3 |
 |--------------------------------------------------------------------------|-----------------|-----------------|-----------------|
-| Load Llama-2-7b-chat for the first time, quantize, and store quant files | TBD             | 23.58 s         | TBD             |
-| Load Llama-2-7b-chat from cached quant files                             | TBD             | 3.46 s          | TBD             |
+| Load Llama-2-7b-chat for the first time, quantize, and store quant files | TBD             | TBD             | 38.0 s          |
+| Load Llama-2-7b-chat from cached quant files                             | TBD             | TBD             | 1.7 s           |
 
 The test system configurations are:
 
