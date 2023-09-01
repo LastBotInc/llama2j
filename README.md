@@ -381,4 +381,4 @@ choices.
 
 # Contact
 
-tero@lasbot.com
+tero@lastbot.com
