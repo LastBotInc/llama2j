@@ -525,9 +525,6 @@ public class Run {
         return System.currentTimeMillis();
     }
 
-// ----------------------------------------------------------------------------
-// sampling can be done in a few ways: greedy argmax, sampling, top-p sampling
-
     public static void main(String[] args) {
         int numberOfThreads = Runtime.getRuntime().availableProcessors();
         if (numberOfThreads >= 64) {
