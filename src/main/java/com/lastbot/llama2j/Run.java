@@ -597,7 +597,7 @@ public class Run {
 
         long endModelRead = time();
 
-        LLogger.info("Read checkpoint in " + String.format("%.2f", (endModelRead - startModelRead) / 1000d) + " s");
+        LLogger.info("Initialized transformer in " + String.format("%.2f", (endModelRead - startModelRead) / 1000d) + " s");
 
         int steps = commandLine.getSteps();
         // right now we cannot run for more than config.seq_len steps
