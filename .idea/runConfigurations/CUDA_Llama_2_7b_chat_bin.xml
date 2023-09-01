@@ -7,7 +7,7 @@
     <option name="MAIN_CLASS_NAME" value="com.lastbot.llama2j.Run" />
     <module name="llama2j" />
     <option name="PROGRAM_PARAMETERS" value="--mode CUDA --checkpoint Llama-2-7b-chat.bin --gpuMem &quot;17&quot;" />
-    <option name="VM_PARAMETERS" value="-Xmx16g -XX:+UnlockExperimentalVMOptions -XX:+UseZGC" />
+    <option name="VM_PARAMETERS" value="-Xmx32g -XX:+UnlockExperimentalVMOptions -XX:+UseZGC" />
     <method v="2">
       <option name="Make" enabled="true" />
     </method>
