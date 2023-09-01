@@ -45,13 +45,29 @@ public abstract class Kernel {
     private static final String CUBIN_EXTENSION = ".cubin";
 
     private static final String CUDA_DIR = "/usr/local/cuda-12.0";
-    private static final String NVCC_PATH = CUDA_DIR + File.separator + "bin" + File.separator + "nvcc";
+    private static final String NVCC_PATH = OsUtils.isWindows() ?
+            (System.getProperty("user.home") + "\\" + "\\miniconda3\\bin\\nvcc.exe") :
+            CUDA_DIR + File.separator + "bin" + File.separator + "nvcc";
     private static final String CUDA_ARCHITECTURE = "compute_89";
     private static final String CUDA_CODE = "sm_89";
 
     protected final int TEST_STREAM = ContextCUDA.TEST_STREAM;
 
     protected static CUfunction defaultFunction;
+
+    public static final class OsUtils
+    {
+        private static String OS = null;
+        public static String getOsName()
+        {
+            if(OS == null) { OS = System.getProperty("os.name"); }
+            return OS;
+        }
+        public static boolean isWindows()
+        {
+            return getOsName().startsWith("Windows");
+        }
+    }
 
     protected Kernel(ContextCUDA cuda, String name) {
         this.cuda = cuda;
