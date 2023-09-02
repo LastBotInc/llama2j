@@ -4,6 +4,8 @@ The llama2j project is based on https://github.com/karpathy/llama2.c
 
 This is a pure Java implementation of standalone LLama 2 inference, without any dependencies.
 
+The project currently is intended for research use.
+
 In addition, we implement CUDA version, where the transformer is implemented
 as a number of CUDA kernels. Java code runs the kernels on GPU using JCuda.
 
